@@ -32,7 +32,8 @@ CFLAGS := -std=c11 \
           -O2 \
           -pthread \
           -I./include \
-          -I./src
+          -I./src \
+          -I./tests
 
 # Linker flags
 LDFLAGS := -pthread
@@ -46,19 +47,32 @@ BIN_DIR := $(BUILD_DIR)/bin
 
 # ============ Source Files ============
 
-# Utility modules
-UTIL_SOURCES := $(SRC_DIR)/util/status.c \
-                $(SRC_DIR)/util/coding.c \
-                $(SRC_DIR)/util/arena.c
+# Library sources (core engine)
+LIB_SOURCES := $(SRC_DIR)/util/status.c \
+               $(SRC_DIR)/util/coding.c \
+               $(SRC_DIR)/util/arena.c \
+               $(SRC_DIR)/util/crc32c.c \
+               $(SRC_DIR)/util/env_posix.c \
+               $(SRC_DIR)/core/skiplist.c \
+               $(SRC_DIR)/core/dbformat.c \
+               $(SRC_DIR)/core/memtable.c \
+               $(SRC_DIR)/core/log_writer.c \
+               $(SRC_DIR)/core/log_reader.c
 
-# Main test program
-MAIN_SOURCE := $(SRC_DIR)/main.c
+# Test sources
+TEST_SOURCES := tests/lithos_test_main.c \
+                tests/test_coding.c \
+                tests/test_arena.c \
+                tests/test_skiplist.c \
+                tests/test_memtable.c \
+                tests/test_wal.c
 
 # All object files
-UTIL_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(UTIL_SOURCES))
-MAIN_OBJECT := $(OBJ_DIR)/main.o
+LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
+TEST_OBJECTS := $(patsubst tests/%.c,$(OBJ_DIR)/tests/%.o,$(TEST_SOURCES))
 
-# Output binary
+# Output files
+LIB_ARCHIVE := $(BUILD_DIR)/liblithos.a
 TEST_BINARY := $(BIN_DIR)/lithos_test
 
 # ============ Targets ============
@@ -66,21 +80,30 @@ TEST_BINARY := $(BIN_DIR)/lithos_test
 .PHONY: all clean test help
 
 # Default target: build everything
-all: $(TEST_BINARY)
+all: $(LIB_ARCHIVE) $(TEST_BINARY)
+
+# Build the static library
+$(LIB_ARCHIVE): $(LIB_OBJECTS) | $(BUILD_DIR)
+	@echo "[AR] $@"
+	@ar rcs $@ $^
+	@echo "Library built: $@"
 
 # Build the test executable
-$(TEST_BINARY): $(MAIN_OBJECT) $(UTIL_OBJECTS) | $(BIN_DIR)
+$(TEST_BINARY): $(TEST_OBJECTS) $(LIB_ARCHIVE)
+	@mkdir -p $(BIN_DIR)
 	@echo "[LINK] $@"
-	@$(CC) $(LDFLAGS) -o $@ $^
+	@$(CC) $(LDFLAGS) -o $@ $(TEST_OBJECTS) -L$(BUILD_DIR) -llithos
 	@echo "Build successful: $@"
 
-# Compile main.c
-$(OBJ_DIR)/main.o: $(MAIN_SOURCE) | $(OBJ_DIR)
+# Compile library sources
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	@mkdir -p $(dir $@)
 	@echo "[CC] $<"
 	@$(CC) $(CFLAGS) -c -o $@ $<
 
-# Compile utility sources
-$(OBJ_DIR)/util/%.o: $(SRC_DIR)/util/%.c | $(OBJ_DIR)/util
+# Compile test sources
+$(OBJ_DIR)/tests/%.o: tests/%.c | $(OBJ_DIR)/tests
+	@mkdir -p $(dir $@)
 	@echo "[CC] $<"
 	@$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -94,8 +117,11 @@ $(OBJ_DIR): | $(BUILD_DIR)
 $(OBJ_DIR)/util: | $(OBJ_DIR)
 	@mkdir -p $(OBJ_DIR)/util
 
-$(BIN_DIR): | $(BUILD_DIR)
-	@mkdir -p $(BIN_DIR)
+$(OBJ_DIR)/core: | $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)/core
+
+$(OBJ_DIR)/tests: | $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)/tests
 
 # Build and run the test program
 test: $(TEST_BINARY)
@@ -132,6 +158,4 @@ help:
 $(OBJ_DIR)/util/status.o: $(SRC_DIR)/util/status.h include/lithos/lithos_status.h
 $(OBJ_DIR)/util/coding.o: $(SRC_DIR)/util/coding.h
 $(OBJ_DIR)/util/arena.o: $(SRC_DIR)/util/arena.h
-$(OBJ_DIR)/main.o: $(SRC_DIR)/util/status.h include/lithos/lithos_status.h \
-                   $(SRC_DIR)/util/slice.h $(SRC_DIR)/util/coding.h \
-                   $(SRC_DIR)/util/arena.h
+$(OBJ_DIR)/tests/lithos_test_main.o: tests/all_tests.h tests/testharness.h

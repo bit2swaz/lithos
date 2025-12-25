@@ -1,24 +1,33 @@
 # Build artifacts
 build/
 *.o
+*.d
 *.a
 *.so
 *.dylib
 
-# Editor/IDE files
+# Editor/IDE files (Good)
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+.clangd/
+compile_commands.json
 
-# Test outputs
+# Test outputs & Database debris
 *.log
 test_db/
+test_wal.log
+*.sst
+MANIFEST
+CURRENT
+LOCK
+LOG
 
 # Core dumps
-core
+/core
 core.*
 
 # Compiled binary
