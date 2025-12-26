@@ -26,6 +26,7 @@
 #include "core/table/filter_block.h"
 #include "core/table/format.h"
 #include "lithos/cache.h"
+#include "util/compression.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 #include <stdlib.h>
@@ -43,9 +44,10 @@ struct Lithos_Table {
     Lithos_Block* index_block;  // Cached index block
     Lithos_BlockHandle metaindex_handle;  // For future filter block support
     FilterBlockReader* filter;  // Bloom filter reader (NULL if no filters)
+    const char* filter_data;    // Owned filter block backing store (heap when present)
 };
 
-/* Read a block from disk (data + trailer), then verify CRC. */
+/* Read a block from disk (data + trailer), then verify CRC and decompress if needed. */
 static Status Table_ReadBlock(Lithos_RandomAccessFile* file,
                               const Lithos_BlockHandle* handle,
                               Lithos_BlockContents* result) {
@@ -82,12 +84,42 @@ static Status Table_ReadBlock(Lithos_RandomAccessFile* file,
         return Status_Corruption("Block checksum mismatch", "");
     }
     
-    /* Expose only the block payload; caller owns the malloc'd buffer. */
-    result->data = buffer;
-    result->size = handle->size;
-    result->heap_allocated = true;
+    if (type == LITHOS_COMPRESSION_NONE) {
+        /* Expose only the block payload; caller owns the malloc'd buffer. */
+        result->data = buffer;
+        result->size = handle->size;
+        result->heap_allocated = true;
+        return Status_OK();
+    }
     
-    return Status_OK();
+    if (type == LITHOS_COMPRESSION_RLE) {
+        if (handle->size < 4) {
+            free(buffer);
+            return Status_Corruption("Compressed block too small", "");
+        }
+
+        uint32_t uncompressed_len = DecodeFixed32(data);
+        char* out = (char*)malloc(uncompressed_len);
+        if (!out) {
+            free(buffer);
+            return Status_IOError("Out of memory", "");
+        }
+
+        bool ok = Lithos_Uncompress(data + 4, handle->size - 4, out, uncompressed_len);
+        free(buffer);
+        if (!ok) {
+            free(out);
+            return Status_Corruption("Failed to decompress block", "");
+        }
+
+        result->data = out;
+        result->size = uncompressed_len;
+        result->heap_allocated = true;
+        return Status_OK();
+    }
+
+    free(buffer);
+    return Status_Corruption("Unknown compression type", "");
 }
 
 /*
@@ -229,6 +261,7 @@ Status Table_Open(const Lithos_Options* options,
     t->index_block = index_block;
     t->metaindex_handle = footer.metaindex_handle;
     t->filter = NULL;
+    t->filter_data = NULL;
     
     /* Step 4: If filters are enabled, read metaindex and filter block. */
     if (options->filter_policy != NULL) {
@@ -259,7 +292,15 @@ Status Table_Open(const Lithos_Options* options,
                             s = Table_ReadBlock(file, &filter_handle, &filter_contents);
                             if (s.code == LITHOS_OK) {
                                 Lithos_Slice filter_data = {filter_contents.data, filter_contents.size};
-                                t->filter = FilterBlockReader_Create(options->filter_policy, filter_data);
+                                FilterBlockReader* reader = FilterBlockReader_Create(options->filter_policy, filter_data);
+                                if (reader != NULL) {
+                                    t->filter = reader;
+                                    if (filter_contents.heap_allocated) {
+                                        t->filter_data = filter_contents.data;
+                                    }
+                                } else if (filter_contents.heap_allocated) {
+                                    free((void*)filter_contents.data);
+                                }
                             }
                         }
                     }
@@ -279,6 +320,9 @@ void Table_Destroy(Lithos_Table* table) {
     if (table) {
         Block_Destroy(table->index_block);
         FilterBlockReader_Destroy(table->filter);
+        if (table->filter_data) {
+            free((void*)table->filter_data);
+        }
         RandomAccessFile_Close(table->file);
         free(table);
     }
@@ -300,6 +344,7 @@ typedef struct {
     Lithos_Iterator* index_iter;   // Iterator over index block
     Lithos_Iterator* data_iter;    // Iterator over current data block
     Lithos_CacheHandle* data_cache_handle;  // Cache handle for current data block
+    Lithos_Block* data_block;      // Owning pointer when block_cache is NULL
     Status status;
     
     /* Current data block handle (decoded from index_iter->Value()) */
@@ -338,10 +383,17 @@ static void TwoLevel_InitDataBlock(TwoLevelIterator* iter) {
         return;
     }
     
-    /* Release previous cache handle if any */
+    /* Drop existing data iterator and release/destroy prior block */
+    if (iter->data_iter) {
+        Lithos_Iter_Destroy(iter->data_iter);
+        iter->data_iter = NULL;
+    }
     if (iter->data_cache_handle) {
         Cache_Release(iter->table->options.block_cache, iter->data_cache_handle);
         iter->data_cache_handle = NULL;
+    } else if (iter->data_block) {
+        Block_Destroy(iter->data_block);
+        iter->data_block = NULL;
     }
     
     /* Read data block from file (or cache) */
@@ -354,14 +406,11 @@ static void TwoLevel_InitDataBlock(TwoLevelIterator* iter) {
         return;
     }
     
-    /* Store cache handle (will be released when moving to next block or destroying iterator) */
+    /* Store ownership info; if no cache handle, we own and must destroy on release */
     iter->data_cache_handle = cache_handle;
+    iter->data_block = data_block;
     
     /* Replace data iterator */
-    if (iter->data_iter) {
-        Lithos_Iter_Destroy(iter->data_iter);
-    }
-    
     iter->data_iter = Block_NewIterator(data_block, InternalKeyComparator);
     iter->have_data_block = true;
     
@@ -522,6 +571,8 @@ static void TwoLevel_Cleanup(void* state) {
     /* Release cache handle if held */
     if (iter->data_cache_handle) {
         Cache_Release(iter->table->options.block_cache, iter->data_cache_handle);
+    } else if (iter->data_block) {
+        Block_Destroy(iter->data_block);
     }
     
     free(iter);
@@ -560,6 +611,7 @@ Lithos_Iterator* Table_NewIterator(Lithos_Table* table, const Lithos_Options* op
     iter->table = table;
     iter->index_iter = index_iter;
     iter->data_iter = NULL;
+    iter->data_block = NULL;
     iter->status = Status_OK();
     iter->have_data_block = false;
     

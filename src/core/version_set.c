@@ -291,6 +291,18 @@ Status VersionSet_LogAndApply(Lithos_VersionSet* set, VersionEdit* edit) {
     set->current = new_version;
     Version_Unref(old); /* Release VersionSet's reference to the previous current. */
 
+    /*
+     * Ownership of FileMetaData entries moves into the Version graph above.
+     * Clear the VersionEdit bookkeeping so later VersionEdit_Clear calls
+     * don't walk pointers that may already be freed when versions are
+     * destroyed (avoids double-free/use-after-free in tests).
+     */
+    for (size_t i = 0; i < edit->new_files_count; i++) {
+        edit->new_files[i].file = NULL;
+    }
+    edit->new_files_count = 0;
+    edit->deleted_files_count = 0;
+
     return Status_OK();
 }
 

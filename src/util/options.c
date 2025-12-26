@@ -29,4 +29,5 @@ void Lithos_Options_InitDefault(Lithos_Options* opt) {
     opt->comparator = NULL;              // Will use default bytewise comparator
     opt->filter_policy = NULL;           // No filtering by default
     opt->block_cache = NULL;             // No caching by default
+    opt->compression_enabled = false;    // Compression off by default
 }

@@ -70,6 +70,7 @@ typedef struct Lithos_Options {
     const Comparator* comparator;
     const Lithos_FilterPolicy* filter_policy;
     Lithos_Cache* block_cache;
+    bool compression_enabled;
 } Lithos_Options;
 
 /**

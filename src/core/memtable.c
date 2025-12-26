@@ -352,8 +352,8 @@ bool MemTable_Get(Lithos_MemTable* mem,
                         found = false;
                     }
                 } else {
-                    // Type is kTypeDeletion
-                    *s = Status_NotFound("Key deleted");
+                    // Type is kTypeDeletion. Use static NotFound to avoid alloc.
+                    *s = Status_NotFound(NULL);
                     found = true; // We found a definitive answer (deletion)
                 }
             } else {

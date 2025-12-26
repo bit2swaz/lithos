@@ -11,6 +11,7 @@
 #include "all_tests.h"
 #include "testharness.h"
 #include "core/table/table_builder.h"
+#include "core/table/table.h"
 #include "core/table/format.h"
 #include "util/coding.h"
 #include "util/env.h"
@@ -276,6 +277,86 @@ static void Test_TableBuilder_LargeTable(void) {
     printf("  ✓ (%d assertions)\n", test_passed);
 }
 
+/* Test: Compression round-trip using RLE */
+static void Test_TableBuilder_Compression(void) {
+    printf("[TEST] TableBuilder Compression (RLE)         ");
+
+    const char* filename = "/tmp/lithos_test_compression.sst";
+    unlink(filename);
+
+    Lithos_WritableFile* file;
+    Status s = Env_NewWritableFile(filename, &file);
+    ASSERT_TRUE(s.code == LITHOS_OK);
+
+    Lithos_Options options;
+    Lithos_Options_InitDefault(&options);
+    options.compression_enabled = true;
+    options.block_size = 512;  // Small blocks to exercise multiple compressed blocks
+
+    Lithos_TableBuilder* tb = TableBuilder_Create(&options, file);
+    ASSERT_TRUE(tb != NULL);
+
+    const int num_entries = 40;
+    char value[128];
+    memset(value, 'Z', sizeof(value));
+    value[sizeof(value) - 1] = '\0';
+
+    for (int i = 0; i < num_entries; i++) {
+        char key[64];
+        snprintf(key, sizeof(key), "ckey%05d", i);
+        Lithos_Slice k = Slice_FromCString(key);
+        Lithos_Slice v = {value, strlen(value)};
+        lithos_status_code status = TableBuilder_Add(tb, k, v);
+        ASSERT_TRUE(status == LITHOS_OK);
+    }
+
+    lithos_status_code finish_status = TableBuilder_Finish(tb);
+    ASSERT_TRUE(finish_status == LITHOS_OK);
+    TableBuilder_Destroy(tb);
+    WritableFile_Close(file);
+
+    /* Open the table and verify contents */
+    Lithos_RandomAccessFile* ra_file;
+    s = Env_NewRandomAccessFile(filename, &ra_file);
+    ASSERT_TRUE(s.code == LITHOS_OK);
+
+    FILE* fp = fopen(filename, "rb");
+    ASSERT_TRUE(fp != NULL);
+    fseek(fp, 0, SEEK_END);
+    uint64_t file_size = ftell(fp);
+    fclose(fp);
+
+    Lithos_Table* table;
+    Lithos_Options read_opts;
+    Lithos_Options_InitDefault(&read_opts);
+    Status open_status = Table_Open(&read_opts, ra_file, file_size, &table);
+    ASSERT_TRUE(open_status.code == LITHOS_OK);
+
+    Lithos_Iterator* iter = Table_NewIterator(table, &read_opts);
+    ASSERT_TRUE(iter != NULL);
+    Lithos_Iter_SeekToFirst(iter);
+
+    for (int i = 0; i < num_entries; i++) {
+        ASSERT_TRUE(Lithos_Iter_Valid(iter));
+        Lithos_Slice key = Lithos_Iter_Key(iter);
+        Lithos_Slice val = Lithos_Iter_Value(iter);
+        char expected_key[64];
+        snprintf(expected_key, sizeof(expected_key), "ckey%05d", i);
+        ASSERT_TRUE(key.size == strlen(expected_key));
+        ASSERT_TRUE(memcmp(key.data, expected_key, key.size) == 0);
+        ASSERT_TRUE(val.size == strlen(value));
+        ASSERT_TRUE(memcmp(val.data, value, val.size) == 0);
+        Lithos_Iter_Next(iter);
+    }
+    ASSERT_TRUE(!Lithos_Iter_Valid(iter));
+
+    Lithos_Iter_Destroy(iter);
+    Table_Destroy(table);
+    unlink(filename);
+
+    printf("  ✓ (%d assertions)\n", test_passed);
+}
+
 /* Main test runner for TableBuilder */
 void Run_TableBuilderTests(void) {
     Test_TableBuilder_Empty();
@@ -283,4 +364,5 @@ void Run_TableBuilderTests(void) {
     Test_TableBuilder_MultipleEntries();
     Test_TableBuilder_MultipleBlocks();
     Test_TableBuilder_LargeTable();
+    Test_TableBuilder_Compression();
 }

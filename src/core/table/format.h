@@ -20,6 +20,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Compression types for block trailers */
+#define LITHOS_COMPRESSION_NONE 0
+#define LITHOS_COMPRESSION_RLE  1
+
 /*
  * BlockHandle: A pointer to a block within an SSTable file.
  * 

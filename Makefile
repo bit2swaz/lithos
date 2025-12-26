@@ -53,6 +53,7 @@ LIB_SOURCES := $(SRC_DIR)/util/status.c \
                $(SRC_DIR)/util/arena.c \
                $(SRC_DIR)/util/crc32c.c \
                $(SRC_DIR)/util/env_posix.c \
+               $(SRC_DIR)/util/compression.c \
                $(SRC_DIR)/util/options.c \
                $(SRC_DIR)/util/bloom.c \
                $(SRC_DIR)/util/cache.c \

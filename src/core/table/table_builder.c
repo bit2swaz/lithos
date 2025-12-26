@@ -28,13 +28,14 @@
 #include "core/table/format.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
+#include "util/compression.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 
 /*
  * Block trailer format (appended after block data):
- * - Type (1 byte): Compression type (0 = no compression)
+ * - Type (1 byte): Compression type (0 = none, 1 = RLE)
  * - CRC32C (4 bytes): Checksum of (Type + Data)
  */
 #define BLOCK_TRAILER_SIZE 5
@@ -78,20 +79,42 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder* tb,
     
     /* Get the finished block content */
     Lithos_Slice block_contents = BlockBuilder_Finish(block);
-    
-    /* For now, no compression (Type = 0) */
-    /* Future: Add Snappy/Zstd compression here */
     const char* raw_data = block_contents.data;
     size_t raw_size = block_contents.size;
-    uint8_t type = 0;  // kNoCompression
+    uint8_t type = LITHOS_COMPRESSION_NONE;
+    
+    /* Optional RLE compression */
+    const char* data_to_write = raw_data;
+    size_t data_size = raw_size;
+    char* compressed_buf = NULL;
+    if (tb->options.compression_enabled && raw_size > 0) {
+        /* Worst-case RLE expansion is 3x for marker-heavy data. Add 4 bytes for raw size. */
+        size_t cap = raw_size * 3 + 4;
+        compressed_buf = (char*)malloc(cap);
+        if (compressed_buf != NULL) {
+            size_t comp_len = cap - 4;
+            bool ok = Lithos_Compress(raw_data, raw_size, compressed_buf + 4, &comp_len);
+            if (ok) {
+                EncodeFixed32(compressed_buf, (uint32_t)raw_size);
+                data_to_write = compressed_buf;
+                data_size = comp_len + 4;  /* include uncompressed length header */
+                type = LITHOS_COMPRESSION_RLE;
+            } else {
+                free(compressed_buf);
+                compressed_buf = NULL;
+            }
+        }
+    }
     
     /* Set handle to point to the block data (NOT including trailer) */
     handle->offset = tb->offset;
-    handle->size = raw_size;
+    handle->size = data_size;
     
     /* Write block data */
-    Status s = WritableFile_Append(tb->file, block_contents);
+    Lithos_Slice payload = {data_to_write, data_size};
+    Status s = WritableFile_Append(tb->file, payload);
     if (s.code != LITHOS_OK) {
+        if (compressed_buf) free(compressed_buf);
         return s.code;
     }
     
@@ -101,18 +124,23 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder* tb,
     
     /* Calculate CRC32C of (Type + Data) */
     uint32_t crc = crc32c_extend(0, trailer, 1);  // Type byte
-    crc = crc32c_extend(crc, raw_data, raw_size);  // Data
+    crc = crc32c_extend(crc, data_to_write, data_size);  // Data
     EncodeFixed32(trailer + 1, crc);
     
     /* Write trailer */
     Lithos_Slice trailer_slice = {trailer, BLOCK_TRAILER_SIZE};
     s = WritableFile_Append(tb->file, trailer_slice);
     if (s.code != LITHOS_OK) {
+        if (compressed_buf) free(compressed_buf);
         return s.code;
     }
     
     /* Update file offset */
-    tb->offset += raw_size + BLOCK_TRAILER_SIZE;
+    tb->offset += data_size + BLOCK_TRAILER_SIZE;
+    
+    if (compressed_buf) {
+        free(compressed_buf);
+    }
     
     return LITHOS_OK;
 }

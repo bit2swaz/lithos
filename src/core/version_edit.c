@@ -109,7 +109,12 @@ void VersionEdit_Init(VersionEdit* edit) {
 
 void VersionEdit_Clear(VersionEdit* edit) {
     for (size_t i = 0; i < edit->new_files_count; i++) {
-        /* Ownership is transferred to VersionSet; no unref here */
+        /* If the FileMetaData was never attached to a Version, refs stays 0. */
+        if (edit->new_files[i].file && edit->new_files[i].file->refs == 0) {
+            free(edit->new_files[i].file->smallest_buf);
+            free(edit->new_files[i].file->largest_buf);
+            free(edit->new_files[i].file);
+        }
     }
     free(edit->new_files);
     free(edit->deleted_files);
