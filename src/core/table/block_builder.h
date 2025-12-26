@@ -84,8 +84,6 @@ void BlockBuilder_Add(Lithos_BlockBuilder* b, Lithos_Slice key, Lithos_Slice val
  *         After this, no more Add() calls are allowed.
  */
 Lithos_Slice BlockBuilder_Finish(Lithos_BlockBuilder* b);
- */
-Lithos_Slice BlockBuilder_Finish(Lithos_BlockBuilder* b);
 
 /**
  * Estimate current size of the block (before Finish).

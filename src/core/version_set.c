@@ -143,6 +143,7 @@ Lithos_VersionSet* VersionSet_Create(const char* dbname) {
     set->dbname = DupString(dbname);
     set->current_manifest_number = 1;
     set->next_file_number = 2;
+    set->table_cache = TableCache_Create(dbname, 1024);
 
     /* Create dummy version list head */
     set->dummy_versions = Version_New(set);
@@ -190,6 +191,9 @@ static void Version_Destroy(Lithos_Version* v) {
 
 void VersionSet_Destroy(Lithos_VersionSet* set) {
     if (set == NULL) return;
+    if (set->table_cache) {
+        TableCache_Destroy(set->table_cache);
+    }
     Lithos_Version* v = set->dummy_versions->next;
     while (v != set->dummy_versions) {
         Lithos_Version* next = v->next;
@@ -282,9 +286,71 @@ void Version_Unref(Lithos_Version* v) {
     }
 }
 
-Status Version_Get(Lithos_Version* v, Lithos_Slice key, Lithos_Slice* value) {
-    (void)v;
-    (void)key;
-    (void)value;
+Status Version_Get(Lithos_Version* v,
+                   const Lithos_ReadOptions* options,
+                   LookupKey key,
+                   Lithos_Slice* value,
+                   bool* found,
+                   bool* deleted) {
+    (void)options;
+    if (found) *found = false;
+    if (deleted) *deleted = false;
+    if (v == NULL || v->vset == NULL) {
+        return Status_NotFound(NULL);
+    }
+
+    TableCache* cache = v->vset->table_cache;
+    /* Level iteration: L0 overlaps (search newest to oldest), L1+ disjoint. */
+    for (int level = 0; level < kNumLevels; level++) {
+        size_t count = v->file_counts[level];
+        if (count == 0) continue;
+
+        if (level == 0) {
+            for (int i = (int)count - 1; i >= 0; i--) {
+                FileMetaData* f = v->files[level][i];
+                Lithos_Slice smallest_user = ExtractUserKey(f->smallest);
+                Lithos_Slice largest_user = ExtractUserKey(f->largest);
+                if (Slice_Compare(key.user_key, smallest_user) < 0) continue;
+                if (Slice_Compare(key.user_key, largest_user) > 0) continue;
+                bool file_found = false;
+                bool file_deleted = false;
+                Status s = TableCache_Get(cache, f, key.internal_key, value, &file_found, &file_deleted);
+                if (!Status_IsOK(s)) return s;
+                if (file_found || file_deleted) {
+                    if (found) *found = file_found;
+                    if (deleted) *deleted = file_deleted;
+                    return Status_OK();
+                }
+            }
+        } else {
+            size_t left = 0, right = count;
+            while (left < right) {
+                size_t mid = (left + right) / 2;
+                Lithos_Slice mid_smallest = ExtractUserKey(v->files[level][mid]->smallest);
+                if (Slice_Compare(mid_smallest, key.user_key) <= 0) {
+                    left = mid + 1;
+                } else {
+                    right = mid;
+                }
+            }
+            if (left == 0) continue;
+            FileMetaData* f = v->files[level][left - 1];
+            Lithos_Slice smallest_user = ExtractUserKey(f->smallest);
+            Lithos_Slice largest_user = ExtractUserKey(f->largest);
+            if (Slice_Compare(key.user_key, smallest_user) < 0) continue;
+            if (Slice_Compare(key.user_key, largest_user) > 0) continue;
+
+            bool file_found = false;
+            bool file_deleted = false;
+            Status s = TableCache_Get(cache, f, key.internal_key, value, &file_found, &file_deleted);
+            if (!Status_IsOK(s)) return s;
+            if (file_found || file_deleted) {
+                if (found) *found = file_found;
+                if (deleted) *deleted = file_deleted;
+                return Status_OK();
+            }
+        }
+    }
+
     return Status_NotFound(NULL);
 }

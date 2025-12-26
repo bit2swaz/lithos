@@ -1,9 +1,9 @@
-# Master Design Specification: Lithos Storage Engine (v2.0)
+# Master Design Specification: Lithos (v1.0)
 
 | Meta Field | Value |
 | --- | --- |
 | **Project Name** | **Lithos** |
-| **Version** | **2.0.0** |
+| **Version** | **1.0.0** |
 | **Author** | Aditya (`@bit2swaz`) |
 | **Status** | **DRAFT** |
 | **Language** | **C11 (ISO/IEC 9899:2011)** |

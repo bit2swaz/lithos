@@ -61,6 +61,9 @@ LIB_SOURCES := $(SRC_DIR)/util/status.c \
                $(SRC_DIR)/core/memtable.c \
                $(SRC_DIR)/core/log_writer.c \
                $(SRC_DIR)/core/log_reader.c \
+               $(SRC_DIR)/core/write_batch.c \
+               $(SRC_DIR)/core/table_cache.c \
+               $(SRC_DIR)/core/db_impl.c \
                $(SRC_DIR)/core/table/block_builder.c \
                $(SRC_DIR)/core/table/format.c \
                $(SRC_DIR)/core/table/table_builder.c \
@@ -82,7 +85,8 @@ TEST_SOURCES := tests/lithos_test_main.c \
                 tests/test_table_reader.c \
                 tests/test_bloom.c \
                 tests/test_cache.c \
-                tests/test_version_set.c
+                tests/test_version_set.c \
+                tests/test_db.c
 
 # All object files
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))

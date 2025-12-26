@@ -18,10 +18,13 @@
 #define LITHOS_CORE_VERSION_SET_H
 
 #include "core/version_edit.h"
+#include "core/table_cache.h"
 #include "util/status.h"
 #include "util/env.h"
 #include "util/slice.h"
 #include "core/log_writer.h"
+#include "lithos/read_options.h"
+#include "lithos/lookup_key.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -50,6 +53,7 @@ struct Lithos_VersionSet {
     Lithos_WritableFile* descriptor_file;
     uint64_t current_manifest_number;
     uint64_t next_file_number;
+    TableCache* table_cache;
 };
 
 Lithos_VersionSet* VersionSet_Create(const char* dbname);
@@ -59,7 +63,12 @@ uint64_t VersionSet_NewFileNumber(Lithos_VersionSet* set);
 
 void Version_Ref(Lithos_Version* v);
 void Version_Unref(Lithos_Version* v);
-Status Version_Get(Lithos_Version* v, Lithos_Slice key, Lithos_Slice* value);
+Status Version_Get(Lithos_Version* v,
+                   const Lithos_ReadOptions* options,
+                   LookupKey key,
+                   Lithos_Slice* value,
+                   bool* found,
+                   bool* deleted);
 
 #ifdef __cplusplus
 }

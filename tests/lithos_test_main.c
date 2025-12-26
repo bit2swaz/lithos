@@ -58,6 +58,9 @@ int main(int argc, char* argv[]) {
     printf(COLOR_YELLOW "\n--- VersionSet Subsystem ---\n" COLOR_RESET);
     Run_VersionSetTests();
 
+    printf(COLOR_YELLOW "\n--- DB Subsystem ---\n" COLOR_RESET);
+    Run_DBTests();
+
     PrintTestSummary();
 
     return test_failed == 0 ? 0 : 1;

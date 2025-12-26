@@ -19,5 +19,6 @@ void Run_TableReaderTests(void);
 void Run_BloomTests(void);
 void Run_CacheTests(void);
 void Run_VersionSetTests(void);
+void Run_DBTests(void);
 
 #endif /* LITHOS_ALL_TESTS_H */
