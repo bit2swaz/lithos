@@ -18,6 +18,7 @@ compile_commands.json
 
 # Test outputs & Database debris
 *.log
+tmp
 test_db/
 test_wal.log
 *.sst

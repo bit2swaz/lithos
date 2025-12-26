@@ -93,22 +93,27 @@ TEST_SOURCES := tests/lithos_test_main.c \
 # CLI sources
 CLI_SOURCES := tools/lithos_cli.c
 
+# Stress tool sources
+STRESS_SOURCES := tools/lithos_stress.c
+
 # All object files
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
 TEST_OBJECTS := $(patsubst tests/%.c,$(OBJ_DIR)/tests/%.o,$(TEST_SOURCES))
 CLI_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(CLI_SOURCES))
+STRESS_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(STRESS_SOURCES))
 
 # Output files
 LIB_ARCHIVE := $(BUILD_DIR)/liblithos.a
 TEST_BINARY := $(BIN_DIR)/lithos_test
 CLI_BINARY := $(BIN_DIR)/lithos_cli
+STRESS_BINARY := $(BIN_DIR)/lithos_stress
 
 # ============ Targets ============
 
-.PHONY: all clean test help
+.PHONY: all clean test help stress
 
 # Default target: build everything
-all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY)
+all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY) $(STRESS_BINARY)
 
 # Build the static library
 $(LIB_ARCHIVE): $(LIB_OBJECTS) | $(BUILD_DIR)
@@ -128,6 +133,13 @@ $(CLI_BINARY): $(CLI_OBJECTS) $(LIB_ARCHIVE)
 	@mkdir -p $(BIN_DIR)
 	@echo "[LINK] $@"
 	@$(CC) $(LDFLAGS) -o $@ $(CLI_OBJECTS) -L$(BUILD_DIR) -llithos
+	@echo "Build successful: $@"
+
+# Build the stress executable
+$(STRESS_BINARY): $(STRESS_OBJECTS) $(LIB_ARCHIVE)
+	@mkdir -p $(BIN_DIR)
+	@echo "[LINK] $@"
+	@$(CC) $(LDFLAGS) -o $@ $(STRESS_OBJECTS) -L$(BUILD_DIR) -llithos
 	@echo "Build successful: $@"
 
 # Compile library sources
@@ -165,6 +177,9 @@ $(OBJ_DIR)/tools: | $(OBJ_DIR)
 test: $(TEST_BINARY)
 	@echo "[RUN] $(TEST_BINARY)"
 	@./$(TEST_BINARY)
+
+# Build the stress gauntlet tool
+stress: $(STRESS_BINARY)
 
 # Clean all build artifacts
 clean:
