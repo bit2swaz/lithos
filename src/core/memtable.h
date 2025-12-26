@@ -149,6 +149,7 @@ void MemTable_Add(Lithos_MemTable* mem, SequenceNumber seq, ValueType type,
  * 
  * @param mem The MemTable.
  * @param key User key to look up.
+ * @param snapshot_seq Sequence upper bound (inclusive). Versions newer than this are ignored.
  * @param value_out Output: Pointer to allocated value (if found and kTypeValue).
  * @param s Output: Status (OK, NotFound, or error).
  * @return true if a definitive answer was found (value or deletion),
@@ -156,7 +157,8 @@ void MemTable_Add(Lithos_MemTable* mem, SequenceNumber seq, ValueType type,
  * 
  * Thread Safety: Lock-free. Can be called concurrently with writes.
  */
-bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Status* s);
+bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, SequenceNumber snapshot_seq,
+                  char** value_out, Status* s);
 
 /**
  * Get approximate memory usage in bytes.

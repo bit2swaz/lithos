@@ -7,7 +7,7 @@
 # Optimization: -O2 (balance between speed and debuggability)
 # 
 # Targets:
-#   all      - Build library and test executable
+#   all      - Build library, tests, and CLI
 #   clean    - Remove all build artifacts
 #   test     - Build and run the test program
 #   help     - Display this help message
@@ -89,20 +89,25 @@ TEST_SOURCES := tests/lithos_test_main.c \
                 tests/test_version_set.c \
                 tests/test_db.c
 
+# CLI sources
+CLI_SOURCES := tools/lithos_cli.c
+
 # All object files
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
 TEST_OBJECTS := $(patsubst tests/%.c,$(OBJ_DIR)/tests/%.o,$(TEST_SOURCES))
+CLI_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(CLI_SOURCES))
 
 # Output files
 LIB_ARCHIVE := $(BUILD_DIR)/liblithos.a
 TEST_BINARY := $(BIN_DIR)/lithos_test
+CLI_BINARY := $(BIN_DIR)/lithos_cli
 
 # ============ Targets ============
 
 .PHONY: all clean test help
 
 # Default target: build everything
-all: $(LIB_ARCHIVE) $(TEST_BINARY)
+all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY)
 
 # Build the static library
 $(LIB_ARCHIVE): $(LIB_OBJECTS) | $(BUILD_DIR)
@@ -117,6 +122,13 @@ $(TEST_BINARY): $(TEST_OBJECTS) $(LIB_ARCHIVE)
 	@$(CC) $(LDFLAGS) -o $@ $(TEST_OBJECTS) -L$(BUILD_DIR) -llithos
 	@echo "Build successful: $@"
 
+# Build the CLI executable
+$(CLI_BINARY): $(CLI_OBJECTS) $(LIB_ARCHIVE)
+	@mkdir -p $(BIN_DIR)
+	@echo "[LINK] $@"
+	@$(CC) $(LDFLAGS) -o $@ $(CLI_OBJECTS) -L$(BUILD_DIR) -llithos
+	@echo "Build successful: $@"
+
 # Compile library sources
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@mkdir -p $(dir $@)
@@ -129,6 +141,12 @@ $(OBJ_DIR)/tests/%.o: tests/%.c | $(OBJ_DIR)/tests
 	@echo "[CC] $<"
 	@$(CC) $(CFLAGS) -c -o $@ $<
 
+# Compile CLI sources
+$(OBJ_DIR)/tools/%.o: tools/%.c | $(OBJ_DIR)/tools
+	@mkdir -p $(dir $@)
+	@echo "[CC] $<"
+	@$(CC) $(CFLAGS) -c -o $@ $<
+
 # Create build directories
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -136,14 +154,11 @@ $(BUILD_DIR):
 $(OBJ_DIR): | $(BUILD_DIR)
 	@mkdir -p $(OBJ_DIR)
 
-$(OBJ_DIR)/util: | $(OBJ_DIR)
-	@mkdir -p $(OBJ_DIR)/util
-
-$(OBJ_DIR)/core: | $(OBJ_DIR)
-	@mkdir -p $(OBJ_DIR)/core
-
 $(OBJ_DIR)/tests: | $(OBJ_DIR)
 	@mkdir -p $(OBJ_DIR)/tests
+
+$(OBJ_DIR)/tools: | $(OBJ_DIR)
+	@mkdir -p $(OBJ_DIR)/tools
 
 # Build and run the test program
 test: $(TEST_BINARY)
@@ -161,7 +176,7 @@ help:
 	@echo "Lithos Storage Engine - Build System"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make all    - Build the library and test executable"
+	@echo "  make all    - Build the library, tests, and CLI"
 	@echo "  make test   - Build and run the test program"
 	@echo "  make clean  - Remove all build artifacts"
 	@echo "  make help   - Display this help message"

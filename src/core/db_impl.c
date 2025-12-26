@@ -1,5 +1,6 @@
 /* Minimal DB implementation: WAL + MemTable with crash recovery. */
 
+#include "lithos.h"
 #include "lithos/db.h"
 #include "util/env.h"
 #include "core/log_writer.h"
@@ -20,6 +21,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+typedef struct Lithos_Snapshot {
+    SequenceNumber sequence;
+    struct Lithos_Snapshot* prev;
+    struct Lithos_Snapshot* next;
+} Lithos_Snapshot;
+
+typedef struct SnapshotList {
+    Lithos_Snapshot head; /* sentinel node */
+} SnapshotList;
+
 struct Lithos_DB {
     Lithos_Options options;
     char* dbname;
@@ -29,6 +40,8 @@ struct Lithos_DB {
     LogWriter* log;
     char* imm_log_filename;
     SequenceNumber last_sequence;
+    SnapshotList snapshots;
+    SequenceNumber oldest_snapshot;
     pthread_mutex_t mu;
     pthread_cond_t bg_cv;
     bool bg_running;
@@ -72,6 +85,78 @@ static char* TableFileName(const char* dbname, uint64_t number) {
 static bool FileExists(const char* fname) {
     struct stat st;
     return stat(fname, &st) == 0;
+}
+
+static void DeleteFileQuietly(const char* fname) {
+    if (fname == NULL) return;
+    Status s = Env_DeleteFile(fname);
+    Status_Free(s);
+}
+
+static void SnapshotList_Init(SnapshotList* list) {
+    list->head.next = &list->head;
+    list->head.prev = &list->head;
+    list->head.sequence = 0;
+}
+
+static bool SnapshotList_Empty(const SnapshotList* list) {
+    return list->head.next == &list->head;
+}
+
+static Lithos_Snapshot* SnapshotList_New(SnapshotList* list, SequenceNumber seq) {
+    Lithos_Snapshot* s = (Lithos_Snapshot*)malloc(sizeof(Lithos_Snapshot));
+    if (s == NULL) return NULL;
+    s->sequence = seq;
+    /* Insert at front: newest snapshots near head, tail holds oldest. */
+    s->next = list->head.next;
+    s->prev = &list->head;
+    list->head.next->prev = s;
+    list->head.next = s;
+    if (list->head.prev == &list->head) {
+        list->head.prev = s;
+    }
+    return s;
+}
+
+static void SnapshotList_Remove(SnapshotList* list, Lithos_Snapshot* s) {
+    if (s == NULL || s == &list->head) return;
+    if (s->next) s->next->prev = s->prev;
+    if (s->prev) s->prev->next = s->next;
+    if (list->head.prev == s) {
+        list->head.prev = (s->prev != &list->head) ? s->prev : &list->head;
+    }
+    free(s);
+}
+
+static SequenceNumber SnapshotList_Oldest(const SnapshotList* list, SequenceNumber current_seq) {
+    if (SnapshotList_Empty(list)) return current_seq + 1; /* No snapshots → allow full pruning. */
+    return list->head.prev->sequence;
+}
+
+static void UpdateOldestSnapshot(Lithos_DB* db) {
+    db->oldest_snapshot = SnapshotList_Oldest(&db->snapshots, db->last_sequence);
+}
+
+static Lithos_Slice EncodeInternalKey(Lithos_Slice user_key,
+                                      SequenceNumber seq,
+                                      ValueType type,
+                                      char* scratch,
+                                      size_t scratch_sz,
+                                      char** heap_out) {
+    if (heap_out) *heap_out = NULL;
+    size_t needed = user_key.size + sizeof(uint64_t);
+    char* buf = NULL;
+    if (needed <= scratch_sz) {
+        buf = scratch;
+    } else {
+        buf = (char*)malloc(needed);
+        if (heap_out) *heap_out = buf;
+        if (buf == NULL) return Slice_Empty();
+    }
+
+    memcpy(buf, user_key.data, user_key.size);
+    EncodeFixed64(buf + user_key.size, PackSequenceAndType(seq, type));
+    return Slice_Create(buf, needed);
 }
 
 static const size_t kWriteBufferSize = 4 * 1024 * 1024; /* 4MB buffer target */
@@ -189,7 +274,7 @@ static Status WriteLevel0Table(Lithos_DB* db,
     Iter_Destroy(iter);
 
     if (!Status_IsOK(s)) {
-        Env_DeleteFile(fname);
+        DeleteFileQuietly(fname);
         free(fname);
         return s;
     }
@@ -244,7 +329,7 @@ static Status CompactMemTable(Lithos_DB* db) {
 
     if (!Status_IsOK(apply_status)) {
         if (fname != NULL) {
-            Env_DeleteFile(fname);
+            DeleteFileQuietly(fname);
             free(fname);
         }
         if (imm_log != NULL && db->imm_log_filename == NULL) {
@@ -258,7 +343,7 @@ static Status CompactMemTable(Lithos_DB* db) {
     db->imm = NULL;
 
     if (imm_log != NULL) {
-        Env_DeleteFile(imm_log);
+        DeleteFileQuietly(imm_log);
         free(imm_log);
     }
     if (fname != NULL) {
@@ -377,6 +462,9 @@ static Status DoCompactionWork(Lithos_DB* db, Lithos_Compaction* c) {
     bool has_key = false;
     Lithos_Slice last_user = Slice_Empty();
     char last_buf[256];
+    SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
+    SequenceNumber smallest_snapshot = db->oldest_snapshot == 0 ? db->last_sequence + 1
+                                                                : db->oldest_snapshot;
 
     Lithos_Iter_SeekToFirst(merge);
     while (Lithos_Iter_Valid(merge)) {
@@ -389,14 +477,19 @@ static Status DoCompactionWork(Lithos_DB* db, Lithos_Compaction* c) {
             break;
         }
 
-        /* Drop shadowed older versions within this compaction */
-        if (last_user.data != NULL && Slice_Compare(last_user, parsed.user_key) == 0) {
-            Lithos_Iter_Next(merge);
-            continue;
+        bool is_new_user = (last_user.data == NULL) || (Slice_Compare(last_user, parsed.user_key) != 0);
+        if (is_new_user) {
+            if (last_user.data != last_buf && last_user.data != NULL) free((void*)last_user.data);
+            last_sequence_for_key = kMaxSequenceNumber;
         }
 
         bool drop = false;
-        if (parsed.type == kTypeDeletion) {
+
+        if (!is_new_user && last_sequence_for_key <= smallest_snapshot) {
+            drop = true; /* Older than any needed snapshot; newer version already seen. */
+        }
+
+        if (!drop && parsed.type == kTypeDeletion && parsed.seq <= smallest_snapshot) {
             if (!KeyExistsInHigherLevels(c, parsed.user_key)) {
                 drop = true;
             }
@@ -415,20 +508,22 @@ static Status DoCompactionWork(Lithos_DB* db, Lithos_Compaction* c) {
             }
         }
 
-        /* Save last user key */
-        if (parsed.user_key.size <= sizeof(last_buf)) {
-            if (last_user.data != last_buf && last_user.data != NULL) free((void*)last_user.data);
-            memcpy(last_buf, parsed.user_key.data, parsed.user_key.size);
-            last_user = Slice_Create(last_buf, parsed.user_key.size);
-        } else {
-            /* For large keys, allocate temporarily */
-            char* tmp = malloc(parsed.user_key.size);
-            if (tmp != NULL) {
-                memcpy(tmp, parsed.user_key.data, parsed.user_key.size);
-                if (last_user.data != last_buf && last_user.data != NULL) free((void*)last_user.data);
-                last_user = Slice_Create(tmp, parsed.user_key.size);
+        if (is_new_user) {
+            if (parsed.user_key.size <= sizeof(last_buf)) {
+                memcpy(last_buf, parsed.user_key.data, parsed.user_key.size);
+                last_user = Slice_Create(last_buf, parsed.user_key.size);
+            } else {
+                char* tmp = malloc(parsed.user_key.size);
+                if (tmp != NULL) {
+                    memcpy(tmp, parsed.user_key.data, parsed.user_key.size);
+                    last_user = Slice_Create(tmp, parsed.user_key.size);
+                } else {
+                    last_user = Slice_Empty();
+                }
             }
         }
+
+        last_sequence_for_key = parsed.seq;
 
         Lithos_Iter_Next(merge);
     }
@@ -462,7 +557,7 @@ done:
 
     if (!Status_IsOK(s)) {
         if (outfile) WritableFile_Close(outfile);
-        if (outname) Env_DeleteFile(outname);
+        if (outname) DeleteFileQuietly(outname);
     }
 
     /* Build and apply VersionEdit */
@@ -641,6 +736,7 @@ static Status ApplyBatchToMem(Lithos_DB* db, Lithos_WriteBatch* batch) {
         int count = WriteBatch_Count(batch);
         if (count > 0) {
             db->last_sequence = ctx.seq - 1;
+            UpdateOldestSnapshot(db);
         }
     }
     return s;
@@ -713,6 +809,8 @@ Status Lithos_DB_Open(const char* name, const Lithos_Options* options, Lithos_DB
     db->imm = NULL;
     db->imm_log_filename = NULL;
     db->last_sequence = 0;
+    SnapshotList_Init(&db->snapshots);
+    db->oldest_snapshot = db->last_sequence + 1;
     pthread_mutex_init(&db->mu, NULL);
     pthread_cond_init(&db->bg_cv, NULL);
     db->bg_running = false;
@@ -731,7 +829,7 @@ Status Lithos_DB_Open(const char* name, const Lithos_Options* options, Lithos_DB
 
     Status s = Recover(db, immwal);
     if (Status_IsOK(s)) {
-        Env_DeleteFile(immwal);
+        DeleteFileQuietly(immwal);
     }
     free(immwal);
     if (!Status_IsOK(s)) {
@@ -784,8 +882,14 @@ void Lithos_DB_Close(Lithos_DB* db) {
         WritableFile_Close(db->logfile);
     }
     if (db->imm_log_filename) {
-        Env_DeleteFile(db->imm_log_filename);
+        DeleteFileQuietly(db->imm_log_filename);
         free(db->imm_log_filename);
+    }
+    Lithos_Snapshot* snap = db->snapshots.head.next;
+    while (snap != &db->snapshots.head) {
+        Lithos_Snapshot* next = snap->next;
+        free(snap);
+        snap = next;
     }
     if (db->mem) {
         MemTable_Unref(db->mem);
@@ -848,7 +952,7 @@ Status Lithos_DB_Delete(Lithos_DB* db, Lithos_Slice key) {
     return s;
 }
 
-Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
+Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, const Lithos_Snapshot* snapshot, char** value_out) {
     if (value_out) *value_out = NULL;
     if (db == NULL) {
         return Status_InvalidArgument("db");
@@ -857,8 +961,10 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
 
     pthread_mutex_lock(&db->mu);
 
+    SequenceNumber snapshot_seq = snapshot ? snapshot->sequence : db->last_sequence;
+
     /* Active MemTable */
-    bool found = MemTable_Get(db->mem, key, value_out, &s);
+    bool found = MemTable_Get(db->mem, key, snapshot_seq, value_out, &s);
     if (found) {
         pthread_mutex_unlock(&db->mu);
         return s;
@@ -866,7 +972,7 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
 
     /* Immutable MemTable */
     if (db->imm != NULL) {
-        found = MemTable_Get(db->imm, key, value_out, &s);
+        found = MemTable_Get(db->imm, key, snapshot_seq, value_out, &s);
         if (found) {
             pthread_mutex_unlock(&db->mu);
             return s;
@@ -883,7 +989,16 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
     pthread_mutex_unlock(&db->mu);
 
     if (current) {
-        Lithos_Slice internal_key = key; /* TODO: encode sequence/type for real SST lookup */
+        char ikey_scratch[256];
+        char* ikey_heap = NULL;
+        Lithos_Slice internal_key = EncodeInternalKey(key, snapshot_seq, kTypeValue, ikey_scratch, sizeof(ikey_scratch), &ikey_heap);
+        if (internal_key.data == NULL) {
+            pthread_mutex_lock(&db->mu);
+            Version_Unref(current);
+            pthread_mutex_unlock(&db->mu);
+            return Status_IOError("alloc internal key", NULL);
+        }
+
         LookupKey lk = LookupKey_Create(key, internal_key);
         bool disk_found = false;
         bool disk_deleted = false;
@@ -899,6 +1014,8 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
         pthread_mutex_lock(&db->mu);
         Version_Unref(current);
         pthread_mutex_unlock(&db->mu);
+
+        if (ikey_heap != NULL) free(ikey_heap);
 
         if (disk_found && value_out != NULL && disk_value.size > 0) {
             char* copy = malloc(disk_value.size + 1);
@@ -916,7 +1033,317 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out) {
     return Status_NotFound(NULL);
 }
 
+const Lithos_Snapshot* Lithos_DB_GetSnapshot(Lithos_DB* db) {
+    if (db == NULL) return NULL;
+    pthread_mutex_lock(&db->mu);
+    Lithos_Snapshot* snap = SnapshotList_New(&db->snapshots, db->last_sequence);
+    UpdateOldestSnapshot(db);
+    pthread_mutex_unlock(&db->mu);
+    return snap;
+}
+
+void Lithos_DB_ReleaseSnapshot(Lithos_DB* db, const Lithos_Snapshot* snapshot) {
+    if (db == NULL || snapshot == NULL) return;
+    pthread_mutex_lock(&db->mu);
+    SnapshotList_Remove(&db->snapshots, (Lithos_Snapshot*)snapshot);
+    UpdateOldestSnapshot(db);
+    pthread_mutex_unlock(&db->mu);
+}
+
 SequenceNumber Lithos_DB_LastSequence(Lithos_DB* db) {
     if (db == NULL) return 0;
     return db->last_sequence;
+}
+
+Status Lithos_Open(const char* dbpath, const Lithos_Options* options, Lithos_DB** db_out) {
+    return Lithos_DB_Open(dbpath, options, db_out);
+}
+
+Status Lithos_Put(Lithos_DB* db, const char* key, const char* value) {
+    if (db == NULL || key == NULL || value == NULL) {
+        return Status_InvalidArgument("put args");
+    }
+    return Lithos_DB_Put(db, Slice_FromCString(key), Slice_FromCString(value));
+}
+
+Status Lithos_Get(Lithos_DB* db, const char* key, const Lithos_Snapshot* snapshot, char** value_out) {
+    if (db == NULL || key == NULL || value_out == NULL) {
+        return Status_InvalidArgument("get args");
+    }
+    return Lithos_DB_Get(db, Slice_FromCString(key), snapshot, value_out);
+}
+
+const Lithos_Snapshot* Lithos_GetSnapshot(Lithos_DB* db) {
+    return Lithos_DB_GetSnapshot(db);
+}
+
+void Lithos_ReleaseSnapshot(Lithos_DB* db, const Lithos_Snapshot* snapshot) {
+    Lithos_DB_ReleaseSnapshot(db, snapshot);
+}
+
+Status Lithos_Delete(Lithos_DB* db, const char* key) {
+    if (db == NULL || key == NULL) {
+        return Status_InvalidArgument("delete args");
+    }
+    return Lithos_DB_Delete(db, Slice_FromCString(key));
+}
+
+static void UnrefFiles(FileMetaData** files, size_t count) {
+    if (!files) return;
+    for (size_t i = 0; i < count; i++) {
+        if (files[i]) FileMetaData_Unref(files[i]);
+    }
+}
+
+Status Lithos_Scan(Lithos_DB* db, Lithos_ScanCallback cb, void* arg) {
+    if (db == NULL || cb == NULL) {
+        return Status_InvalidArgument("scan args");
+    }
+
+    Lithos_MemTable* mem = NULL;
+    Lithos_MemTable* imm = NULL;
+    Lithos_Version* current = NULL;
+    TableCache* cache = NULL;
+    Lithos_Options options = db->options;
+    size_t total_files = 0;
+
+    pthread_mutex_lock(&db->mu);
+    if (db->mem) {
+        mem = db->mem;
+        MemTable_Ref(mem);
+    }
+    if (db->imm) {
+        imm = db->imm;
+        MemTable_Ref(imm);
+    }
+    if (db->versions) {
+        current = db->versions->current;
+        cache = db->versions->table_cache;
+        if (current) {
+            Version_Ref(current);
+            for (int level = 0; level < kNumLevels; level++) {
+                total_files += current->file_counts[level];
+            }
+        }
+    }
+    pthread_mutex_unlock(&db->mu);
+
+    Status s = Status_OK();
+    size_t total_iters = total_files;
+    if (total_files == 0 && mem == NULL && imm == NULL) {
+        goto cleanup;
+    }
+
+    Lithos_Iterator** iters = NULL;
+    FileMetaData** file_refs = NULL;
+    size_t idx = 0;
+    size_t file_idx = 0;
+
+    if (total_files > 0) {
+        iters = calloc(total_iters, sizeof(Lithos_Iterator*));
+        file_refs = calloc(total_files, sizeof(FileMetaData*));
+        if (iters == NULL || file_refs == NULL) {
+            s = Status_IOError("alloc scan iters", NULL);
+            free(iters);
+            free(file_refs);
+            goto cleanup;
+        }
+    }
+
+    if (current && cache && total_files > 0) {
+        for (int level = 0; level < kNumLevels; level++) {
+            for (size_t i = 0; i < current->file_counts[level]; i++) {
+                FileMetaData* f = current->files[level][i];
+                FileMetaData_Ref(f);
+                file_refs[file_idx++] = f;
+                Lithos_Iterator* titer = TableCache_NewIterator(cache, f, &options);
+                if (titer == NULL) {
+                    s = Status_IOError("table iter", NULL);
+                    goto build_fail;
+                }
+                iters[idx++] = titer;
+            }
+        }
+    }
+
+    /* Emit MemTable keys first (newest data lives here). */
+    if (mem) {
+        Lithos_Iterator* mi = MemTable_NewIterator(mem);
+        if (mi == NULL) {
+            s = Status_IOError("mem iter", NULL);
+            goto build_fail;
+        }
+        Iter_SeekToFirst(mi);
+        while (Iter_Valid(mi)) {
+            const Lithos_Slice* entry = (const Lithos_Slice*)Iter_Key(mi);
+            Lithos_Slice ikey = EntryInternalKey(entry);
+            Lithos_Slice value = EntryValue(entry);
+            ParsedInternalKey parsed;
+            if (!ParseInternalKey(ikey, &parsed)) {
+                s = Status_Corruption("scan parse mem", NULL);
+                break;
+            }
+            if (parsed.type != kTypeDeletion) {
+                char* key_copy = malloc(parsed.user_key.size + 1);
+                char* val_copy = malloc(value.size + 1);
+                if (key_copy == NULL || val_copy == NULL) {
+                    free(key_copy);
+                    free(val_copy);
+                    s = Status_IOError("scan alloc mem", NULL);
+                    break;
+                }
+                memcpy(key_copy, parsed.user_key.data, parsed.user_key.size);
+                key_copy[parsed.user_key.size] = '\0';
+                memcpy(val_copy, value.data, value.size);
+                val_copy[value.size] = '\0';
+                cb(key_copy, val_copy, arg);
+                free(key_copy);
+                free(val_copy);
+            }
+            Iter_Next(mi);
+        }
+        Iter_Destroy(mi);
+        if (!Status_IsOK(s)) goto build_fail;
+    }
+
+    if (imm) {
+        Lithos_Iterator* mi = MemTable_NewIterator(imm);
+        if (mi == NULL) {
+            s = Status_IOError("imm iter", NULL);
+            goto build_fail;
+        }
+        Iter_SeekToFirst(mi);
+        while (Iter_Valid(mi)) {
+            const Lithos_Slice* entry = (const Lithos_Slice*)Iter_Key(mi);
+            Lithos_Slice ikey = EntryInternalKey(entry);
+            Lithos_Slice value = EntryValue(entry);
+            ParsedInternalKey parsed;
+            if (!ParseInternalKey(ikey, &parsed)) {
+                s = Status_Corruption("scan parse imm", NULL);
+                break;
+            }
+            if (parsed.type != kTypeDeletion) {
+                char* key_copy = malloc(parsed.user_key.size + 1);
+                char* val_copy = malloc(value.size + 1);
+                if (key_copy == NULL || val_copy == NULL) {
+                    free(key_copy);
+                    free(val_copy);
+                    s = Status_IOError("scan alloc imm", NULL);
+                    break;
+                }
+                memcpy(key_copy, parsed.user_key.data, parsed.user_key.size);
+                key_copy[parsed.user_key.size] = '\0';
+                memcpy(val_copy, value.data, value.size);
+                val_copy[value.size] = '\0';
+                cb(key_copy, val_copy, arg);
+                free(key_copy);
+                free(val_copy);
+            }
+            Iter_Next(mi);
+        }
+        Iter_Destroy(mi);
+        if (!Status_IsOK(s)) goto build_fail;
+    }
+
+    if (total_files > 0) {
+        Lithos_Iterator* merge = NewMergingIterator(iters, (int)total_iters, InternalKeyComparator);
+        if (merge == NULL) {
+            s = Status_IOError("merge iter", NULL);
+            goto build_fail;
+        }
+
+        Lithos_Iter_SeekToFirst(merge);
+        char* prev_key = NULL;
+        size_t prev_len = 0;
+
+        while (Lithos_Iter_Valid(merge)) {
+            Lithos_Slice internal_key = Lithos_Iter_Key(merge);
+            ParsedInternalKey parsed;
+            if (!ParseInternalKey(internal_key, &parsed)) {
+                s = Status_Corruption("scan parse table", NULL);
+                break;
+            }
+
+            if (prev_key && prev_len == parsed.user_key.size &&
+                memcmp(prev_key, parsed.user_key.data, prev_len) == 0) {
+                Lithos_Iter_Next(merge);
+                continue;
+            }
+
+            free(prev_key);
+            prev_key = NULL;
+            prev_len = 0;
+            if (parsed.user_key.size > 0) {
+                prev_key = malloc(parsed.user_key.size);
+                if (prev_key) {
+                    memcpy(prev_key, parsed.user_key.data, parsed.user_key.size);
+                    prev_len = parsed.user_key.size;
+                }
+            }
+
+            if (parsed.type == kTypeDeletion) {
+                Lithos_Iter_Next(merge);
+                continue;
+            }
+
+            Lithos_Slice value = Lithos_Iter_Value(merge);
+            char* key_copy = malloc(parsed.user_key.size + 1);
+            char* val_copy = malloc(value.size + 1);
+            if (key_copy == NULL || val_copy == NULL) {
+                free(key_copy);
+                free(val_copy);
+                s = Status_IOError("scan alloc table", NULL);
+                free(prev_key);
+                prev_key = NULL;
+                prev_len = 0;
+                break;
+            }
+            memcpy(key_copy, parsed.user_key.data, parsed.user_key.size);
+            key_copy[parsed.user_key.size] = '\0';
+            memcpy(val_copy, value.data, value.size);
+            val_copy[value.size] = '\0';
+
+            cb(key_copy, val_copy, arg);
+
+            free(key_copy);
+            free(val_copy);
+            Lithos_Iter_Next(merge);
+        }
+
+        Status iter_status = Lithos_Iter_GetStatus(merge);
+        if (Status_IsOK(s)) {
+            s = iter_status;
+        } else {
+            Status_Free(iter_status);
+        }
+
+        free(prev_key);
+        Lithos_Iter_Destroy(merge);
+    }
+
+    goto build_cleanup;
+
+build_fail:
+    for (size_t j = 0; j < idx; j++) {
+        if (iters && iters[j]) Lithos_Iter_Destroy(iters[j]);
+    }
+
+build_cleanup:
+    free(iters);
+    UnrefFiles(file_refs, file_idx);
+    free(file_refs);
+
+cleanup:
+    if (mem) MemTable_Unref(mem);
+    if (imm) MemTable_Unref(imm);
+    if (current) Version_Unref(current);
+    return s;
+}
+
+void Lithos_Close(Lithos_DB* db) {
+    Lithos_DB_Close(db);
+}
+
+void Lithos_Free(void* ptr) {
+    free(ptr);
 }

@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 typedef struct Lithos_DB Lithos_DB;
+typedef struct Lithos_Snapshot Lithos_Snapshot;
 
 typedef struct Lithos_WriteOptions {
     bool sync; /* If true, fsync WAL on every write. */
@@ -27,7 +28,9 @@ void Lithos_DB_Close(Lithos_DB* db);
 Status Lithos_DB_Put(Lithos_DB* db, Lithos_Slice key, Lithos_Slice value);
 Status Lithos_DB_Delete(Lithos_DB* db, Lithos_Slice key);
 Status Lithos_DB_Write(Lithos_DB* db, Lithos_WriteOptions options, Lithos_WriteBatch* batch);
-Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, char** value_out);
+Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, const Lithos_Snapshot* snapshot, char** value_out);
+const Lithos_Snapshot* Lithos_DB_GetSnapshot(Lithos_DB* db);
+void Lithos_DB_ReleaseSnapshot(Lithos_DB* db, const Lithos_Snapshot* snapshot);
 SequenceNumber Lithos_DB_LastSequence(Lithos_DB* db);
 
 #ifdef __cplusplus

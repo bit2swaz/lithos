@@ -262,7 +262,11 @@ void MemTable_Add(Lithos_MemTable* mem, SequenceNumber seq, ValueType type,
     SkipList_Insert(mem->table, encoded);
 }
 
-bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Status* s) {
+bool MemTable_Get(Lithos_MemTable* mem,
+                  Lithos_Slice key,
+                  SequenceNumber snapshot_seq,
+                  char** value_out,
+                  Status* s) {
     assert(mem != NULL);
     assert(value_out != NULL);
     assert(s != NULL);
@@ -299,7 +303,8 @@ bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Stat
     // Pack kMaxSequenceNumber + kTypeValue
     // This creates a "seek past newest" sentinel, so the iterator lands on the
     // freshest version for this user key (versions are ordered descending by seq).
-    uint64_t packed = PackSequenceAndType(kMaxSequenceNumber, kTypeValue);
+    SequenceNumber seq = snapshot_seq == 0 ? kMaxSequenceNumber : snapshot_seq;
+    uint64_t packed = PackSequenceAndType(seq, kTypeValue);
     EncodeFixed64(p, packed);
     
     Lithos_Slice lookup_slice = Slice_Create(buf, needed);

@@ -25,7 +25,7 @@ static void Test_MemTable(void) {
 
     MemTable_Add(mem, 10, kTypeValue, key1, val1);
 
-    bool found = MemTable_Get(mem, key1, &value, &s);
+    bool found = MemTable_Get(mem, key1, kMaxSequenceNumber, &value, &s);
     if (found && Status_IsOK(s)) {
         if (strcmp(value, "value1") == 0) {
             printf("    Get('key1') = '%s'\n", value);
@@ -47,7 +47,7 @@ static void Test_MemTable(void) {
 
     MemTable_Add(mem, 20, kTypeValue, key1, val2);
 
-    found = MemTable_Get(mem, key1, &value, &s);
+    found = MemTable_Get(mem, key1, kMaxSequenceNumber, &value, &s);
     if (found && Status_IsOK(s)) {
         if (strcmp(value, "value2_newer") == 0) {
             printf("    Get('key1') = '%s'\n", value);
@@ -69,7 +69,7 @@ static void Test_MemTable(void) {
 
     MemTable_Add(mem, 30, kTypeDeletion, key1, empty);
 
-    found = MemTable_Get(mem, key1, &value, &s);
+    found = MemTable_Get(mem, key1, kMaxSequenceNumber, &value, &s);
     if (found) {
         if (!Status_IsOK(s)) {
             printf("    Get('key1') after delete: " COLOR_GREEN "NotFound\n" COLOR_RESET);
@@ -99,7 +99,7 @@ static void Test_MemTable(void) {
     MemTable_Add(mem, 60, kTypeValue, key4, val_cherry);
 
     // Verify apple
-    found = MemTable_Get(mem, key2, &value, &s);
+    found = MemTable_Get(mem, key2, kMaxSequenceNumber, &value, &s);
     if (found && Status_IsOK(s) && strcmp(value, "red") == 0) {
         printf("    Get('apple') = 'red'\n");
         free(value);
@@ -110,7 +110,7 @@ static void Test_MemTable(void) {
     }
 
     // Verify banana
-    found = MemTable_Get(mem, key3, &value, &s);
+    found = MemTable_Get(mem, key3, kMaxSequenceNumber, &value, &s);
     if (found && Status_IsOK(s) && strcmp(value, "yellow") == 0) {
         printf("    Get('banana') = 'yellow'\n");
         free(value);
@@ -121,7 +121,7 @@ static void Test_MemTable(void) {
     }
 
     // Verify cherry
-    found = MemTable_Get(mem, key4, &value, &s);
+    found = MemTable_Get(mem, key4, kMaxSequenceNumber, &value, &s);
     if (found && Status_IsOK(s) && strcmp(value, "dark_red") == 0) {
         printf("    Get('cherry') = 'dark_red'\n");
         free(value);
@@ -135,7 +135,7 @@ static void Test_MemTable(void) {
     printf("  Test 5: Non-Existent Key\n");
     Lithos_Slice key_missing = Slice_Create("missing", 7);
 
-    found = MemTable_Get(mem, key_missing, &value, &s);
+    found = MemTable_Get(mem, key_missing, kMaxSequenceNumber, &value, &s);
     if (!found) {
         printf("    Get('missing'): " COLOR_GREEN "Not in MemTable\n" COLOR_RESET);
     } else {

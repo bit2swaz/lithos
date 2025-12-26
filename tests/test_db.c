@@ -28,7 +28,7 @@ static void TestPutGet(void) {
     ASSERT_OK(s);
 
     char* out = NULL;
-    s = Lithos_DB_Get(db, Slice_FromCString("k1"), &out);
+    s = Lithos_DB_Get(db, Slice_FromCString("k1"), NULL, &out);
     ASSERT_OK(s);
     ASSERT_TRUE(out != NULL && strcmp(out, "v1") == 0);
     free(out);
@@ -52,11 +52,11 @@ static void TestWriteBatch(void) {
     ASSERT_OK(s);
 
     char* out = NULL;
-    s = Lithos_DB_Get(db, Slice_FromCString("a"), &out);
+    s = Lithos_DB_Get(db, Slice_FromCString("a"), NULL, &out);
     ASSERT_TRUE(Status_IsNotFound(s));
     Status_Free(s);
 
-    s = Lithos_DB_Get(db, Slice_FromCString("b"), &out);
+    s = Lithos_DB_Get(db, Slice_FromCString("b"), NULL, &out);
     ASSERT_OK(s);
     ASSERT_TRUE(out != NULL && strcmp(out, "2") == 0);
     free(out);
@@ -76,7 +76,7 @@ static void TestRecovery(void) {
     ASSERT_OK(s);
 
     char* out = NULL;
-    s = Lithos_DB_Get(db, Slice_FromCString("foo"), &out);
+    s = Lithos_DB_Get(db, Slice_FromCString("foo"), NULL, &out);
     ASSERT_OK(s);
     ASSERT_TRUE(out != NULL && strcmp(out, "bar") == 0);
     free(out);
