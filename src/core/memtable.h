@@ -67,6 +67,7 @@
  * MemTable: Opaque structure for the in-memory write buffer.
  */
 typedef struct Lithos_MemTable Lithos_MemTable;
+typedef struct Lithos_Iterator Lithos_Iterator;
 
 /* ============ Lifecycle Functions ============ */
 
@@ -168,5 +169,8 @@ bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Stat
  * @return Approximate memory usage in bytes.
  */
 size_t MemTable_ApproximateMemoryUsage(const Lithos_MemTable* mem);
+
+/* Create a SkipList iterator over the encoded entries. Caller owns the result. */
+Lithos_Iterator* MemTable_NewIterator(Lithos_MemTable* mem);
 
 #endif // LITHOS_CORE_MEMTABLE_H

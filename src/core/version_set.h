@@ -26,6 +26,7 @@
 #include "lithos/read_options.h"
 #include "lithos/lookup_key.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,7 @@ extern "C" {
 
 typedef struct Lithos_Version Lithos_Version;
 typedef struct Lithos_VersionSet Lithos_VersionSet;
+typedef struct Lithos_Compaction Lithos_Compaction;
 
 struct Lithos_Version {
     Lithos_VersionSet* vset;
@@ -60,6 +62,17 @@ Lithos_VersionSet* VersionSet_Create(const char* dbname);
 void VersionSet_Destroy(Lithos_VersionSet* set);
 Status VersionSet_LogAndApply(Lithos_VersionSet* set, VersionEdit* edit);
 uint64_t VersionSet_NewFileNumber(Lithos_VersionSet* set);
+Lithos_Compaction* VersionSet_PickCompaction(Lithos_VersionSet* set);
+bool VersionSet_NeedsCompaction(Lithos_VersionSet* set);
+void Compaction_Destroy(Lithos_Compaction* c);
+
+struct Lithos_Compaction {
+    Lithos_VersionSet* vset;
+    int level; /* Inputs are level and level+1 */
+    FileMetaData** inputs[2];
+    size_t input_count[2];
+    bool trivial_move;
+};
 
 void Version_Ref(Lithos_Version* v);
 void Version_Unref(Lithos_Version* v);

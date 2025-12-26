@@ -6,6 +6,8 @@
 #include "core/version_edit.h"
 #include "util/slice.h"
 #include "util/status.h"
+#include "lithos/options.h"
+#include "lithos/iterator.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -23,6 +25,11 @@ Status TableCache_Get(TableCache* cache,
                       Lithos_Slice* value_out,
                       bool* found,
                       bool* deleted);
+
+/* Create an iterator over a cached table. Caller owns returned iterator. */
+Lithos_Iterator* TableCache_NewIterator(TableCache* cache,
+                                        FileMetaData* f,
+                                        const Lithos_Options* options);
 
 #ifdef __cplusplus
 }

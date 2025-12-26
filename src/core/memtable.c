@@ -372,3 +372,8 @@ size_t MemTable_ApproximateMemoryUsage(const Lithos_MemTable* mem) {
     assert(mem != NULL);
     return Arena_MemoryUsage(mem->arena);
 }
+
+Lithos_Iterator* MemTable_NewIterator(Lithos_MemTable* mem) {
+    assert(mem != NULL);
+    return SkipList_NewIterator(mem->table);
+}

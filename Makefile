@@ -70,6 +70,7 @@ LIB_SOURCES := $(SRC_DIR)/util/status.c \
                $(SRC_DIR)/core/table/block.c \
                $(SRC_DIR)/core/table/table.c \
                $(SRC_DIR)/core/table/filter_block.c \
+               $(SRC_DIR)/core/table/merger.c \
                $(SRC_DIR)/core/version_edit.c \
                $(SRC_DIR)/core/version_set.c
 

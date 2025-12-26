@@ -37,6 +37,30 @@
 #include <assert.h>
 #include <sys/stat.h>
 
+static double MaxBytesForLevel(int level) {
+    if (level <= 0) return 10 * 1024 * 1024.0; /* unused for L0 score */
+    double base = 10 * 1024 * 1024.0; /* 10MB for L1 */
+    double bytes = base;
+    for (int i = 1; i < level; i++) {
+        bytes *= 10.0; /* Li size target: 10^(i) MB */
+    }
+    return bytes;
+}
+
+static bool Overlaps(FileMetaData* f, Lithos_Slice user_key) {
+    Lithos_Slice s = ExtractUserKey(f->smallest);
+    Lithos_Slice l = ExtractUserKey(f->largest);
+    return Slice_Compare(user_key, s) >= 0 && Slice_Compare(user_key, l) <= 0;
+}
+
+static bool FilesOverlap(FileMetaData* a, FileMetaData* b) {
+    Lithos_Slice a_s = ExtractUserKey(a->smallest);
+    Lithos_Slice a_l = ExtractUserKey(a->largest);
+    Lithos_Slice b_s = ExtractUserKey(b->smallest);
+    Lithos_Slice b_l = ExtractUserKey(b->largest);
+    return !(Slice_Compare(a_l, b_s) < 0 || Slice_Compare(b_l, a_s) < 0);
+}
+
 static Lithos_Version* Version_New(Lithos_VersionSet* set) {
     Lithos_Version* v = calloc(1, sizeof(Lithos_Version));
     if (v == NULL) return NULL;
@@ -284,6 +308,104 @@ void Version_Unref(Lithos_Version* v) {
         VersionUnlink(v);
         Version_Destroy(v);
     }
+}
+
+static void Compaction_AddInput(Lithos_Compaction* c, int which, FileMetaData* f) {
+    size_t cap = c->input_count[which] == 0 ? 4 : c->input_count[which] * 2;
+    if (c->input_count[which] >= cap) cap = c->input_count[which] + 1;
+    FileMetaData** nf = realloc(c->inputs[which], cap * sizeof(FileMetaData*));
+    if (nf == NULL) return;
+    c->inputs[which] = nf;
+    c->inputs[which][c->input_count[which]++] = f;
+    FileMetaData_Ref(f);
+}
+
+bool VersionSet_NeedsCompaction(Lithos_VersionSet* set) {
+    if (set == NULL || set->current == NULL) return false;
+    Lithos_Version* v = set->current;
+    double best = 0.0;
+    for (int level = 0; level < kNumLevels; level++) {
+        double score = 0.0;
+        if (level == 0) {
+            score = (double)v->file_counts[level] / 4.0;
+        } else {
+            uint64_t total = 0;
+            for (size_t i = 0; i < v->file_counts[level]; i++) total += v->files[level][i]->file_size;
+            double max_bytes = MaxBytesForLevel(level);
+            score = max_bytes > 0 ? (double)total / max_bytes : 0.0;
+        }
+        if (score > best) best = score;
+    }
+    return best >= 1.0;
+}
+
+Lithos_Compaction* VersionSet_PickCompaction(Lithos_VersionSet* set) {
+    if (set == NULL || set->current == NULL) return NULL;
+    Lithos_Version* v = set->current;
+
+    int best_level = -1;
+    double best_score = 0.0;
+    for (int level = 0; level < kNumLevels; level++) {
+        double score = 0.0;
+        if (level == 0) {
+            score = (double)v->file_counts[level] / 4.0;
+        } else {
+            uint64_t total = 0;
+            for (size_t i = 0; i < v->file_counts[level]; i++) total += v->files[level][i]->file_size;
+            double max_bytes = MaxBytesForLevel(level);
+            score = max_bytes > 0 ? (double)total / max_bytes : 0.0;
+        }
+        if (score > best_score) {
+            best_score = score;
+            best_level = level;
+        }
+    }
+
+    if (best_level < 0 || best_score < 1.0 || best_level >= kNumLevels - 1) {
+        return NULL;
+    }
+
+    Lithos_Compaction* c = calloc(1, sizeof(Lithos_Compaction));
+    if (c == NULL) return NULL;
+    c->vset = set;
+    c->level = best_level;
+
+    if (v->file_counts[best_level] > 0) {
+        /* Simple pick: the first file in level */
+        Compaction_AddInput(c, 0, v->files[best_level][0]);
+    }
+
+    /* Add overlapping files from level+1; detect trivial move when none. */
+    if (c->input_count[0] > 0) {
+        FileMetaData* f = c->inputs[0][0];
+        Lithos_Slice small = ExtractUserKey(f->smallest);
+        Lithos_Slice large = ExtractUserKey(f->largest);
+        int next_level = best_level + 1;
+        size_t overlaps = 0;
+        for (size_t i = 0; i < v->file_counts[next_level]; i++) {
+            FileMetaData* cand = v->files[next_level][i];
+            if (FilesOverlap(f, cand) || Overlaps(cand, small) || Overlaps(cand, large)) {
+                overlaps++;
+                Compaction_AddInput(c, 1, cand);
+            }
+        }
+        if (overlaps == 0) {
+            c->trivial_move = true;
+        }
+    }
+
+    return c;
+}
+
+void Compaction_Destroy(Lithos_Compaction* c) {
+    if (c == NULL) return;
+    for (int i = 0; i < 2; i++) {
+        for (size_t j = 0; j < c->input_count[i]; j++) {
+            FileMetaData_Unref(c->inputs[i][j]);
+        }
+        free(c->inputs[i]);
+    }
+    free(c);
 }
 
 Status Version_Get(Lithos_Version* v,
