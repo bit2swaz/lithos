@@ -1,28 +1,14 @@
 /**
- * Lithos Storage Engine - Internal Status Wrapper
- * 
- * This module provides a richer Status type for internal use, wrapping
- * the public lithos_status_code enum with detailed error messages.
- * 
- * Why a struct wrapper?
- * In C++, we'd use exceptions or std::expected. In Go, we'd return (T, error).
- * In C, we use a struct that carries both a code and a message. This allows:
- * - Propagating context up the call stack ("SSTable corrupted at offset 1024")
- * - Avoiding errno (which is thread-local but gets clobbered)
- * - Consistent error handling across sync/async paths
- * 
- * Memory Management:
- * - OK statuses have NULL state (zero allocation).
- * - Error messages are stored as malloc'd strings OR static strings.
- * - Callers must call Status_Free() on non-OK statuses to avoid leaks.
- * - We provide a Status_Move() to transfer ownership semantically.
- * 
- * Concurrency:
- * - Status objects are NOT thread-safe (they're value types).
- * - Each thread should create its own Status for returns.
- * 
- * Author: Aditya (@bit2swaz)
- * Version: 2.0.0
+ * Big Picture: Status = "return codes with context"
+ * ================================================
+ * C lacks exceptions, so every API returns a Status (code + optional message).
+ * This wrapper makes errors explicit and readable while remaining cheap to
+ * copy. Think of it as a tiny Result/expected type for C.
+ *
+ * Where it fits: All public APIs (Env, Table, WAL) bubble errors up using
+ * Status. Callers check Status_IsOK() and can log Status_ToString() for detail.
+ *
+ * Key Concepts: error codes, heap-owned messages, explicit ownership (free!).
  */
 
 #ifndef LITHOS_UTIL_STATUS_H
@@ -49,8 +35,8 @@ extern "C" {
  *   a heap/static string describing the error.
  */
 typedef struct {
-    lithos_status_code code;
-    const char* state;  // NULL if OK, else error message
+    lithos_status_code code;  // Machine-readable error code (OK / NOT_FOUND / IO_ERROR...).
+    const char* state;        // Human-readable message; NULL for OK to avoid allocations.
 } Status;
 
 /**

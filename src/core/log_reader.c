@@ -114,7 +114,7 @@ static bool ReadPhysicalRecord(LogReader* reader, Lithos_Slice* result, RecordTy
         
         // Need at least a header
         if (remaining < kHeaderSize) {
-            // Treat as end of block (likely zero padding)
+            // Treat as end of block (likely zero padding); hop to next block.
             reader->buffer_offset = reader->buffer_size;
             continue;
         }
@@ -140,7 +140,7 @@ static bool ReadPhysicalRecord(LogReader* reader, Lithos_Slice* result, RecordTy
             continue;
         }
         
-        // Extract payload
+        // Extract payload slice within the block
         const char* payload = header + kHeaderSize;
         
         // Verify checksum if enabled
@@ -174,6 +174,8 @@ static bool ReadPhysicalRecord(LogReader* reader, Lithos_Slice* result, RecordTy
 
 bool LogReader_ReadRecord(LogReader* reader, Lithos_Slice* record, char** scratch) {
     // State for accumulating fragments
+    // `scratch` acts as caller-owned buffer; we transfer ownership of the
+    // assembled record here so the caller can reuse or free after use.
     bool in_fragmented_record = false;
     char* fragment_buffer = NULL;
     size_t fragment_size = 0;

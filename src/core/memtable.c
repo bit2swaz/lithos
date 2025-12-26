@@ -282,6 +282,7 @@ bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Stat
     if (needed <= sizeof(lookup_buf)) {
         buf = lookup_buf;
     } else {
+        // Large keys spill to heap to avoid blowing the small stack buffer.
         buf = (char*)malloc(needed);
         if (buf == NULL) {
             *s = Status_IOError("Out of memory", "");
@@ -296,6 +297,8 @@ bool MemTable_Get(Lithos_MemTable* mem, Lithos_Slice key, char** value_out, Stat
     p += key.size;
     
     // Pack kMaxSequenceNumber + kTypeValue
+    // This creates a "seek past newest" sentinel, so the iterator lands on the
+    // freshest version for this user key (versions are ordered descending by seq).
     uint64_t packed = PackSequenceAndType(kMaxSequenceNumber, kTypeValue);
     EncodeFixed64(p, packed);
     

@@ -81,16 +81,16 @@ static char* Arena_AllocateFallbackSlow(Lithos_Arena* arena, size_t bytes);
  */
 struct Lithos_Arena {
     /* Current allocation state */
-    char* alloc_ptr;              // Pointer to next allocation in current block
-    size_t alloc_bytes_remaining; // Bytes remaining in current block
+    char* alloc_ptr;              // Pointer to the next free byte inside the current block.
+    size_t alloc_bytes_remaining; // How many bytes remain in the current block.
     
     /* Block management */
-    char** blocks;                // Dynamic array of pointers to allocated blocks
-    size_t blocks_count;          // Number of blocks currently allocated
-    size_t blocks_capacity;       // Capacity of the blocks array
+    char** blocks;                // Growable list of all allocated blocks (for bulk free).
+    size_t blocks_count;          // How many blocks are currently stored.
+    size_t blocks_capacity;       // Current capacity of the blocks pointer array.
     
     /* Statistics */
-    _Atomic size_t memory_usage;  // Total bytes allocated (thread-safe)
+    _Atomic size_t memory_usage;  // Total bytes handed out by malloc (atomic for stats).
 };
 
 /**
@@ -175,11 +175,11 @@ Lithos_Arena* Arena_Create(void) {
     }
     
     // Initialize to empty state
-    arena->alloc_ptr = NULL;
-    arena->alloc_bytes_remaining = 0;
-    arena->blocks = NULL;
-    arena->blocks_count = 0;
-    arena->blocks_capacity = 0;
+    arena->alloc_ptr = NULL;              // No current block yet
+    arena->alloc_bytes_remaining = 0;     // Nothing available until first block alloc
+    arena->blocks = NULL;                 // No block array yet
+    arena->blocks_count = 0;              // No blocks tracked yet
+    arena->blocks_capacity = 0;           // Capacity will grow on first add
     atomic_init(&arena->memory_usage, 0);
     
     return arena;
@@ -209,9 +209,9 @@ char* Arena_Allocate(Lithos_Arena* arena, size_t bytes) {
     
     if (bytes <= arena->alloc_bytes_remaining) {
         // Fast path: allocation fits in current block
-        char* result = arena->alloc_ptr;
-        arena->alloc_ptr += bytes;
-        arena->alloc_bytes_remaining -= bytes;
+        char* result = arena->alloc_ptr;      // Hand out current pointer
+        arena->alloc_ptr += bytes;            // Bump pointer forward by requested bytes
+        arena->alloc_bytes_remaining -= bytes; // Decrease remaining space
         return result;
     }
     
@@ -253,8 +253,8 @@ char* Arena_AllocateFallbackSlow(Lithos_Arena* arena, size_t bytes) {
     }
     
     // Make this the current block
-    arena->alloc_ptr = new_block + bytes;
-    arena->alloc_bytes_remaining = kBlockSize - bytes;
+    arena->alloc_ptr = new_block + bytes;          // Next free byte after the chunk we return
+    arena->alloc_bytes_remaining = kBlockSize - bytes; // Remaining capacity in this block
     
     return new_block;
 }
@@ -270,27 +270,27 @@ char* Arena_AllocateAligned(Lithos_Arena* arena, size_t bytes) {
     
     // Calculate current misalignment
     // Example: if alloc_ptr = 0x1003, then current_mod = 3
-    uintptr_t current_mod = (uintptr_t)arena->alloc_ptr & (align - 1);
+    uintptr_t current_mod = (uintptr_t)arena->alloc_ptr & (align - 1); // Low bits reveal misalignment
     
     // Calculate padding needed to reach next alignment boundary
     // If already aligned (current_mod == 0), needed will be 0
     // If misaligned (e.g., current_mod == 3), needed will be (8 - 3) = 5
-    size_t needed = (align - current_mod) & (align - 1);
+    size_t needed = (align - current_mod) & (align - 1); // If already aligned, this becomes 0
     
     // Calculate total size needed (padding + actual allocation)
-    size_t total_bytes = needed + bytes;
+    size_t total_bytes = needed + bytes; // Padding + user payload
     
     // Check if it fits in current block
     char* result;
     if (total_bytes <= arena->alloc_bytes_remaining) {
         // Fast path: fits in current block
-        result = arena->alloc_ptr + needed;  // Skip padding
-        arena->alloc_ptr += total_bytes;
-        arena->alloc_bytes_remaining -= total_bytes;
+        result = arena->alloc_ptr + needed;  // Skip padding to reach aligned address
+        arena->alloc_ptr += total_bytes;     // Consume padding + payload in one bump
+        arena->alloc_bytes_remaining -= total_bytes; // Update remaining space
     } else {
         // Slow path: need new block
         // First, try to allocate the full size (padding + bytes)
-        result = Arena_AllocateFallbackSlow(arena, bytes);
+        result = Arena_AllocateFallbackSlow(arena, bytes); // May return unaligned pointer
         if (result == NULL) {
             return NULL;
         }
@@ -301,7 +301,7 @@ char* Arena_AllocateAligned(Lithos_Arena* arena, size_t bytes) {
             // Still not aligned (rare but possible)
             // Allocate again with padding
             needed = (align - current_mod) & (align - 1);
-            result = Arena_Allocate(arena, bytes + needed) + needed;
+            result = Arena_Allocate(arena, bytes + needed) + needed; // Grab extra padding then skip it
         }
     }
     

@@ -40,6 +40,24 @@ int main(int argc, char* argv[]) {
     printf(COLOR_YELLOW "\n--- WAL Subsystem ---\n" COLOR_RESET);
     Run_WALTests();
 
+    printf(COLOR_YELLOW "\n--- BlockBuilder Subsystem ---\n" COLOR_RESET);
+    Run_BlockBuilderTests();
+
+    printf(COLOR_YELLOW "\n--- TableBuilder Subsystem ---\n" COLOR_RESET);
+    Run_TableBuilderTests();
+
+    printf(COLOR_YELLOW "\n--- TableReader Subsystem ---\n" COLOR_RESET);
+    Run_TableReaderTests();
+
+    printf(COLOR_YELLOW "\n--- Bloom Filter Subsystem ---\n" COLOR_RESET);
+    Run_BloomTests();
+
+    printf(COLOR_YELLOW "\n--- Block Cache Subsystem ---\n" COLOR_RESET);
+    Run_CacheTests();
+
+    printf(COLOR_YELLOW "\n--- VersionSet Subsystem ---\n" COLOR_RESET);
+    Run_VersionSetTests();
+
     PrintTestSummary();
 
     return test_failed == 0 ? 0 : 1;

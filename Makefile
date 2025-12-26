@@ -53,11 +53,22 @@ LIB_SOURCES := $(SRC_DIR)/util/status.c \
                $(SRC_DIR)/util/arena.c \
                $(SRC_DIR)/util/crc32c.c \
                $(SRC_DIR)/util/env_posix.c \
+               $(SRC_DIR)/util/options.c \
+               $(SRC_DIR)/util/bloom.c \
+               $(SRC_DIR)/util/cache.c \
                $(SRC_DIR)/core/skiplist.c \
                $(SRC_DIR)/core/dbformat.c \
                $(SRC_DIR)/core/memtable.c \
                $(SRC_DIR)/core/log_writer.c \
-               $(SRC_DIR)/core/log_reader.c
+               $(SRC_DIR)/core/log_reader.c \
+               $(SRC_DIR)/core/table/block_builder.c \
+               $(SRC_DIR)/core/table/format.c \
+               $(SRC_DIR)/core/table/table_builder.c \
+               $(SRC_DIR)/core/table/block.c \
+               $(SRC_DIR)/core/table/table.c \
+               $(SRC_DIR)/core/table/filter_block.c \
+               $(SRC_DIR)/core/version_edit.c \
+               $(SRC_DIR)/core/version_set.c
 
 # Test sources
 TEST_SOURCES := tests/lithos_test_main.c \
@@ -65,7 +76,13 @@ TEST_SOURCES := tests/lithos_test_main.c \
                 tests/test_arena.c \
                 tests/test_skiplist.c \
                 tests/test_memtable.c \
-                tests/test_wal.c
+                tests/test_wal.c \
+                tests/test_block_builder.c \
+                tests/test_table_builder.c \
+                tests/test_table_reader.c \
+                tests/test_bloom.c \
+                tests/test_cache.c \
+                tests/test_version_set.c
 
 # All object files
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))

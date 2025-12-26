@@ -1,23 +1,23 @@
-/**
- * env_posix.c - POSIX Implementation of File System Abstraction
- * 
- * Author: Aditya (@bit2swaz)
- * 
- * This module wraps standard C library file I/O (<stdio.h>) and POSIX
- * system calls (<unistd.h>) to implement the Env interface.
- * 
- * Key Implementation Notes:
- * 1. **Buffering:** We use FILE* (stdio.h) for automatic buffering.
- * 2. **Durability:** WritableFile_Sync() calls fsync(2) to force disk writes.
- * 3. **Error Handling:** All functions check errno and convert to Status codes.
- * 
- * Why fsync() is Critical:
- * - fwrite() -> User-space buffer (libc)
- * - fflush() -> Kernel page cache (OS)
- * - fsync() -> Physical disk (hardware)
- * 
- * Without fsync(), a crash between fflush() and the OS background writeback
- * (typically 30 seconds on Linux) results in data loss.
+/*
+ * POSIX File I/O: Portable System Call Wrappers for Storage
+ * ========================================================
+ * Implements the Env interface using POSIX system calls, providing portable
+ * file operations for SSTable and WAL I/O.
+ *
+ * Big Picture: File I/O Layer = "OS Abstraction for Reliable Storage"
+ * ================================================================
+ * Databases need to read/write files reliably across different operating systems.
+ * The Env abstraction hides OS differences and ensures durability guarantees.
+ * Without proper fsync(), crashes can lose committed data.
+ *
+ * Where it fits: All SSTable and WAL operations go through this layer. It
+ * handles buffering, error conversion, and durability guarantees.
+ *
+ * Key Concepts:
+ * - Buffered I/O: FILE* provides automatic buffering for performance.
+ * - Durability: fsync() ensures data reaches physical storage.
+ * - Error handling: errno to Status code conversion.
+ * - Sequential vs Random: Different access patterns for SSTables vs WAL.
  */
 
 #define _POSIX_C_SOURCE 200809L  // Enable strdup and other POSIX functions
@@ -263,6 +263,86 @@ Status SequentialFile_Close(Lithos_SequentialFile* f) {
     free(f);
     
     return s;
+}
+
+// --- Random Access File Implementation ---
+
+struct Lithos_RandomAccessFile {
+    FILE* fp;
+    char* filename;
+};
+
+Status Env_NewRandomAccessFile(const char* fname, Lithos_RandomAccessFile** result) {
+    FILE* fp = fopen(fname, "rb");
+    if (fp == NULL) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Failed to open file: %s", fname);
+        return Status_IOError(msg, strerror(errno));
+    }
+    
+    Lithos_RandomAccessFile* f = (Lithos_RandomAccessFile*)malloc(sizeof(Lithos_RandomAccessFile));
+    if (f == NULL) {
+        fclose(fp);
+        return Status_IOError("Out of memory", "");
+    }
+    
+    f->fp = fp;
+    f->filename = strdup(fname);
+    if (f->filename == NULL) {
+        free(f);
+        fclose(fp);
+        return Status_IOError("Out of memory", "");
+    }
+    
+    *result = f;
+    return Status_OK();
+}
+
+Status RandomAccessFile_Read(Lithos_RandomAccessFile* f, uint64_t offset, size_t n,
+                              Lithos_Slice* result, char* scratch) {
+    /* Seek to offset */
+    if (fseek(f->fp, offset, SEEK_SET) != 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Seek failed: %s", f->filename);
+        return Status_IOError(msg, strerror(errno));
+    }
+    
+    /* Read n bytes */
+    size_t bytes_read = fread(scratch, 1, n, f->fp);
+    
+    if (bytes_read < n) {
+        if (feof(f->fp)) {
+            /* End of file - this is OK, just return what we read */
+            result->data = scratch;
+            result->size = bytes_read;
+            return Status_OK();
+        }
+        if (ferror(f->fp)) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Read failed: %s", f->filename);
+            return Status_IOError(msg, strerror(errno));
+        }
+    }
+    
+    result->data = scratch;
+    result->size = bytes_read;
+    return Status_OK();
+}
+
+void RandomAccessFile_Close(Lithos_RandomAccessFile* f) {
+    if (f == NULL) {
+        return;
+    }
+    
+    if (f->fp != NULL) {
+        fclose(f->fp);
+    }
+    
+    if (f->filename != NULL) {
+        free(f->filename);
+    }
+    
+    free(f);
 }
 
 // --- Utility Functions ---

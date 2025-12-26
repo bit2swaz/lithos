@@ -233,6 +233,8 @@ static Node* FindGreaterOrEqual(const Lithos_SkipList* list, const void* key, No
     Node* x = list->head;
     int level = atomic_load_explicit(&list->max_height, memory_order_acquire) - 1;
     
+    // Classic top-down descent: stride right on the current level until we would
+    // overshoot, then drop down a level and continue. Level 0 returns the answer.
     while (true) {
         Node* next = GetNext(x, level);
         

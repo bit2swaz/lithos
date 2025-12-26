@@ -1,21 +1,23 @@
-/**
- * env.h - File System Abstraction Layer
- * 
- * Author: Aditya (@bit2swaz)
- * 
- * This module provides OS-agnostic file I/O interfaces.
- * The POSIX implementation (env_posix.c) wraps standard <stdio.h> functions.
- * Future implementations could support Windows (HANDLE) or custom userspace I/O.
- * 
- * Key Design Decisions:
- * 1. **Opaque Handles:** File structs are opaque to prevent direct manipulation.
- * 2. **Status Returns:** All operations return Status for consistent error handling.
- * 3. **Explicit Sync:** Flush vs Sync distinction enforces durability guarantees.
- * 
- * File Types:
- * - WritableFile: Sequential writes (WAL, SSTable creation).
- * - SequentialFile: Sequential reads (Log recovery, SSTable scanning).
- * - RandomAccessFile: Random reads (SSTable block queries) [Future].
+/*
+ * File System Abstraction: Portable I/O for Storage Engines
+ * ========================================================
+ * Provides OS-agnostic file operations, abstracting away platform differences
+ * in file I/O for reliable database storage.
+ *
+ * Big Picture: Env Layer = "OS Abstraction for Reliable Storage"
+ * ===========================================================
+ * Databases need to read/write files reliably across different operating systems.
+ * The Env abstraction hides OS differences and ensures durability guarantees.
+ * Without proper fsync(), crashes can lose committed data.
+ *
+ * Where it fits: All SSTable and WAL operations go through this layer. It
+ * handles buffering, error conversion, and durability guarantees.
+ *
+ * Key Concepts:
+ * - Opaque handles: File structs prevent direct manipulation.
+ * - Status returns: Consistent error handling across all operations.
+ * - Explicit sync: Flush vs Sync distinction for durability control.
+ * - File types: Sequential writes (WAL), sequential reads (recovery), random reads (SSTables).
  */
 
 #ifndef LITHOS_ENV_H
@@ -178,6 +180,41 @@ Status SequentialFile_Skip(Lithos_SequentialFile* f, size_t n);
  * Returns: Status_OK().
  */
 Status SequentialFile_Close(Lithos_SequentialFile* f);
+
+// --- Random Access File Operations ---
+
+/**
+ * Env_NewRandomAccessFile - Open a file for random reads.
+ * 
+ * @param fname: Path to file.
+ * @param result: Output pointer to RandomAccessFile handle.
+ * 
+ * Returns: Status_OK() on success.
+ * Use Case: Opening SSTable files for reading.
+ */
+Status Env_NewRandomAccessFile(const char* fname, Lithos_RandomAccessFile** result);
+
+/**
+ * RandomAccessFile_Read - Read data at a specific offset.
+ * 
+ * @param f: RandomAccessFile handle.
+ * @param offset: Byte offset to read from.
+ * @param n: Number of bytes to read.
+ * @param result: Output slice pointing to read data.
+ * @param scratch: Buffer to store data (must be at least n bytes).
+ * 
+ * Returns: Status_OK() on success.
+ * Note: result->data may point to scratch or internal buffer.
+ */
+Status RandomAccessFile_Read(Lithos_RandomAccessFile* f, uint64_t offset, size_t n,
+                              Lithos_Slice* result, char* scratch);
+
+/**
+ * RandomAccessFile_Close - Close the file.
+ * 
+ * @param f: RandomAccessFile handle (can be NULL).
+ */
+void RandomAccessFile_Close(Lithos_RandomAccessFile* f);
 
 // --- Utility Operations ---
 

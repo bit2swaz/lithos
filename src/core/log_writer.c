@@ -137,6 +137,7 @@ Status LogWriter_AddRecord(LogWriter* writer, Lithos_Slice slice) {
         
         // Recalculate available space (we might have moved to a new block)
         const int avail = kBlockSize - writer->block_offset - kHeaderSize;
+        // Only `avail` bytes are usable for payload; we reserve header space upfront.
         
         // Calculate fragment size (how much of the record fits in this block)
         const size_t fragment_length = (left < (size_t)avail) ? left : (size_t)avail;
@@ -164,7 +165,7 @@ Status LogWriter_AddRecord(LogWriter* writer, Lithos_Slice slice) {
         // Move pointers
         ptr += fragment_length;
         left -= fragment_length;
-        begin = false;
+        begin = false;  // After first fragment, subsequent chunks are middle/last
         
     } while (left > 0);
     

@@ -161,13 +161,13 @@ char* EncodeVarint32(char* dst, uint32_t v) {
     static const int B = 128;  // Continuation flag threshold
     
     while (v >= B) {
-        // Write 7 bits + continuation flag
+        // Write low 7 bits and set continuation bit (bit 7) to say "more bytes follow".
         *ptr = (uint8_t)(v | B);
-        v >>= 7;
-        ptr++;
+        v >>= 7;      // Drop the 7 bits we just wrote; keep encoding the rest.
+        ptr++;        // Advance output pointer.
     }
     
-    // Write the final byte (no continuation flag)
+    // Write the final byte (continuation bit clear because this is the last chunk).
     *ptr = (uint8_t)v;
     ptr++;
     
@@ -184,12 +184,12 @@ char* EncodeVarint64(char* dst, uint64_t v) {
     static const uint64_t B = 128;
     
     while (v >= B) {
-        *ptr = (uint8_t)(v | B);
-        v >>= 7;
+        *ptr = (uint8_t)(v | B); // Low 7 bits + continuation flag
+        v >>= 7;                 // Keep encoding remaining bits
         ptr++;
     }
     
-    *ptr = (uint8_t)v;
+    *ptr = (uint8_t)v; // Last byte, flag cleared
     ptr++;
     
     return (char*)ptr;
@@ -233,13 +233,13 @@ const char* GetVarint32Ptr(const char* p, const char* limit, uint32_t* value) {
         // Add the 7 data bits to the result
         if (byte < 128) {
             // Last byte (no continuation bit)
-            result |= ((uint32_t)byte) << shift;
+            result |= ((uint32_t)byte) << shift;  // Place these 7 bits at current shift position
             *value = result;
             return p;
         } else {
             // More bytes coming
-            result |= ((uint32_t)(byte & 127)) << shift;
-            shift += 7;
+            result |= ((uint32_t)(byte & 127)) << shift; // Mask off flag, keep data bits
+            shift += 7;                                   // Next chunk will be 7 bits higher
         }
     }
     
@@ -272,13 +272,13 @@ const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
         
         if (byte < 128) {
             // Last byte
-            result |= ((uint64_t)byte) << shift;
+            result |= ((uint64_t)byte) << shift;  // Drop into place and finish
             *value = result;
             return p;
         } else {
             // More bytes coming
-            result |= ((uint64_t)(byte & 127)) << shift;
-            shift += 7;
+            result |= ((uint64_t)(byte & 127)) << shift; // Accumulate 7-bit payload
+            shift += 7;                                  // Prepare for next chunk
         }
     }
     

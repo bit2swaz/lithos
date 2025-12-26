@@ -1,40 +1,17 @@
 /**
- * Lithos Storage Engine - Slice Abstraction
- * 
- * A Slice is a lightweight reference to a contiguous sequence of bytes.
- * It is conceptually similar to:
- * - C++ std::string_view (C++17)
- * - Go's []byte slice
- * - Rust's &[u8] slice
- * - LevelDB's Slice
- * 
- * Key Properties:
- * - Does NOT own the underlying memory
- * - Cheap to copy (just 16 bytes on 64-bit: pointer + size)
- * - Avoids allocations for temporary string operations
- * - Can represent a substring without copying
- * 
- * CRITICAL SAFETY WARNING:
- * ========================
- * The Slice is only valid as long as the underlying memory remains valid.
- * Example of INCORRECT usage:
- * 
- *   Lithos_Slice BadFunction() {
- *       char buffer[100];
- *       strcpy(buffer, "Hello");
- *       return Slice_Create(buffer, 5);  // DANGLING POINTER!
- *   }
- * 
- * The returned Slice points to stack memory that's deallocated when
- * BadFunction returns. Accessing it causes undefined behavior.
- * 
- * Correct usage:
- * - Point to string literals: Slice_Create("hello", 5) ✓
- * - Point to heap-allocated strings (valid as long as they exist) ✓
- * - Point to Arena-allocated memory ✓
- * 
- * Author: Aditya (@bit2swaz)
- * Version: 2.0.0
+ * Big Picture: Slice = "Just a pointer + length"
+ * ===============================================
+ * This file defines a non-owning view over bytes. We use Slices everywhere to
+ * avoid copying strings/keys/values. Think of it as C's take on std::string_view.
+ *
+ * Where it fits: The entire database API trades Slices instead of malloc'd
+ * strings. WAL records, SSTable keys, MemTable entries—all pass by reference to
+ * avoid allocations.
+ *
+ * Key Concepts:
+ * - Non-owning views: lifetime is managed elsewhere (arena, heap, static).
+ * - Zero-copy substrings: pointer arithmetic, no memmove.
+ * - Safety caveat: dangling pointers if backing storage dies.
  */
 
 #ifndef LITHOS_UTIL_SLICE_H
@@ -50,20 +27,13 @@
 extern "C" {
 #endif
 
-/**
+/*
  * Lithos_Slice - A non-owning view into a byte sequence.
- * 
- * Layout (16 bytes on 64-bit systems):
- * - data (8 bytes): Pointer to the first byte
- * - size (8 bytes): Number of bytes in the sequence
- * 
- * Invariants:
- * - If size == 0, data MAY be NULL (empty slice).
- * - If size > 0, data MUST be a valid pointer to at least 'size' bytes.
+ * Fields are tiny and meant to be copied by value.
  */
 typedef struct {
-    const char* data;
-    size_t size;
+    const char* data;  // Pointer to first byte; memory is owned elsewhere.
+    size_t size;       // How many bytes are readable starting at data.
 } Lithos_Slice;
 
 /**
@@ -83,8 +53,8 @@ typedef struct {
  */
 static inline Lithos_Slice Slice_Create(const char* d, size_t n) {
     Lithos_Slice s;
-    s.data = d;
-    s.size = n;
+    s.data = d;  // Store caller-provided pointer (no copy happens here).
+    s.size = n;  // Remember how many bytes are valid starting at data.
     return s;
 }
 
@@ -103,7 +73,7 @@ static inline Lithos_Slice Slice_Create(const char* d, size_t n) {
  *   // s.size == 5, s.data points to "Hello"
  */
 static inline Lithos_Slice Slice_FromCString(const char* str) {
-    return Slice_Create(str, strlen(str));
+    return Slice_Create(str, strlen(str));  // strlen walks until '\0'; excludes terminator.
 }
 
 /**
@@ -235,6 +205,7 @@ static inline bool Slice_StartsWith(Lithos_Slice s, Lithos_Slice prefix) {
  */
 static inline Lithos_Slice Slice_RemovePrefix(Lithos_Slice s, Lithos_Slice prefix) {
     if (Slice_StartsWith(s, prefix)) {
+        // Move the data pointer forward by prefix.size bytes; shrink length accordingly.
         return Slice_Create(s.data + prefix.size, s.size - prefix.size);
     }
     return s;

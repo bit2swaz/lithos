@@ -1,38 +1,23 @@
-/**
- * log_format.h - Write-Ahead Log Physical Format
- * 
- * Author: Aditya (@bit2swaz)
- * 
- * The WAL is a sequence of 32KB blocks. Each block contains one or more records.
- * If a record doesn't fit in the remaining space of a block, it is fragmented
- * across multiple blocks using FIRST, MIDDLE, and LAST record types.
- * 
- * Physical Layout:
- * 
- *   [Block 0: 32KB]
- *   [Block 1: 32KB]
- *   [Block 2: 32KB]
- *   ...
- * 
- * Each record has a 7-byte header:
- * 
- *   | Checksum (4B) | Length (2B) | Type (1B) | Payload (N bytes) |
- * 
- * - Checksum: CRC32C of (Type byte + Payload). Little-Endian.
- * - Length: Payload length (0-65535). Little-Endian uint16_t.
- * - Type: Record type (Full, First, Middle, Last, Zero).
- * 
- * Fragmentation Example:
- * 
- *   User writes 70KB record:
- *   - Block 0: FIRST (32KB - 7 = 32761 bytes of payload)
- *   - Block 1: MIDDLE (32761 bytes)
- *   - Block 2: LAST (remaining ~4478 bytes)
- * 
- * Why 32KB?
- * - Aligns with OS page cache (typically 4KB pages, so 8 pages per block).
- * - Allows efficient sequential reads (modern SSDs prefer larger I/O).
- * - Balances between fragmentation overhead and read amplification.
+/*
+ * WAL Format: Physical Layout for Write-Ahead Logging
+ * ==================================================
+ * Defines the on-disk format for the Write-Ahead Log, ensuring durability
+ * and crash recovery for uncommitted data.
+ *
+ * Big Picture: WAL Format = "Sequential Log for Crash Recovery"
+ * ===========================================================
+ * Databases must survive crashes without losing committed data. The WAL
+ * provides a sequential log of all changes. On recovery, we replay the WAL
+ * to restore the database to a consistent state.
+ *
+ * Where it fits: WAL is written before MemTable changes are committed.
+ * It's the "write path" that ensures durability.
+ *
+ * Key Concepts:
+ * - 32KB blocks: Aligns with OS page cache for efficient I/O.
+ * - Record fragmentation: Large records split across blocks.
+ * - Checksums: CRC32C protects against corruption.
+ * - Types: Full, First, Middle, Last for fragmentation handling.
  */
 
 #ifndef LITHOS_LOG_FORMAT_H

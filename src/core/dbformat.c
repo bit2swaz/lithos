@@ -103,6 +103,8 @@ int InternalKeyComparator(const void* a, const void* b) {
     // kTypeValue (0x01) < kTypeDeletion (0x00) is FALSE
     // Actually, kTypeDeletion (0x00) < kTypeValue (0x01)
     // But we want Values to appear before Deletions, so:
+    // This intentionally inverts the natural enum ordering so the newest
+    // value shadows a same-seq tombstone during iteration.
     if (atype < btype) {
         return 1;  // a is Deletion, b is Value -> b comes first
     } else if (atype > btype) {

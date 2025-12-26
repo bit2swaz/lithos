@@ -1,13 +1,23 @@
-/**
- * crc32c.c - CRC32C (Castagnoli) Implementation
- * 
- * Author: Aditya (@bit2swaz)
- * 
- * Algorithm: Table-driven CRC32C with Castagnoli polynomial (0x1EDC6F41).
- * 
- * The lookup table is precomputed to speed up the byte-by-byte CRC calculation.
- * Each byte is XORed with the current CRC, and the result is used to index
- * into the table to get the next CRC state.
+/*
+ * CRC32C: Hardware-Accelerated Checksums for Data Integrity
+ * ========================================================
+ * Implements Castagnoli CRC32C for detecting data corruption in SSTable
+ * blocks and WAL records.
+ *
+ * Big Picture: Checksums = "Mathematical Proof of Data Integrity"
+ * ===============================================================
+ * Disk I/O can corrupt data silently. CRC32C provides mathematical assurance
+ * that blocks haven't been corrupted. If the computed CRC doesn't match the
+ * stored CRC, we know the data is bad and can retry or fail gracefully.
+ *
+ * Where it fits: Every SSTable block and WAL record has a CRC32C checksum.
+ * Readers verify CRCs before using data, preventing silent corruption bugs.
+ *
+ * Key Concepts:
+ * - Castagnoli polynomial: Better error detection than basic CRC32.
+ * - Lookup table: Precomputed values for fast byte-by-byte processing.
+ * - Hardware acceleration: Modern CPUs have CRC32C instructions.
+ * - End-to-end verification: Checksums protect the entire I/O pipeline.
  */
 
 #include "crc32c.h"
