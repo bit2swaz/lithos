@@ -1,12 +1,3 @@
-/*
- * test_table_reader.c - SSTable Reader Tests
- *
- * Validates the complete read path:
- * - Block parsing and iteration
- * - Table opening and footer reading
- * - TwoLevelIterator correctness
- * - Seek operations and boundary conditions
- */
 
 #include "all_tests.h"
 #include "core/table/block.h"
@@ -19,7 +10,6 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Helper: Create a test SSTable with known data */
 static const char *CreateTestTable(const char *filename, int num_entries) {
   unlink(filename);
 
@@ -31,7 +21,7 @@ static const char *CreateTestTable(const char *filename, int num_entries) {
 
   Lithos_Options options;
   Lithos_Options_InitDefault(&options);
-  options.block_size = 1024; // Small blocks for testing
+  options.block_size = 1024;
 
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   if (!tb) {
@@ -39,7 +29,6 @@ static const char *CreateTestTable(const char *filename, int num_entries) {
     return "Failed to create TableBuilder";
   }
 
-  /* Add sorted entries */
   for (int i = 0; i < num_entries; i++) {
     char key[64], value[128];
     snprintf(key, sizeof(key), "key%05d", i);
@@ -67,7 +56,6 @@ static const char *CreateTestTable(const char *filename, int num_entries) {
   return NULL;
 }
 
-/* Test: Open table and verify basic properties */
 static void Test_TableReader_Open(void) {
   printf("[TEST] TableReader Open                        ");
 
@@ -75,7 +63,6 @@ static void Test_TableReader_Open(void) {
   const char *err = CreateTestTable(filename, 100);
   ASSERT_TRUE(err == NULL);
 
-  /* Get file size */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -85,7 +72,6 @@ static void Test_TableReader_Open(void) {
   uint64_t file_size = ftell(fp);
   fclose(fp);
 
-  /* Open table */
   Lithos_Options options;
   Lithos_Options_InitDefault(&options);
 
@@ -100,7 +86,6 @@ static void Test_TableReader_Open(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Iterator SeekToFirst */
 static void Test_TableReader_SeekToFirst(void) {
   printf("[TEST] TableReader SeekToFirst                 ");
 
@@ -108,7 +93,6 @@ static void Test_TableReader_SeekToFirst(void) {
   const char *err = CreateTestTable(filename, 50);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -125,15 +109,12 @@ static void Test_TableReader_SeekToFirst(void) {
   s = Table_Open(&options, file, file_size, &table);
   ASSERT_TRUE(s.code == LITHOS_OK);
 
-  /* Create iterator */
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Seek to first */
   Lithos_Iter_SeekToFirst(iter);
   ASSERT_TRUE(Lithos_Iter_Valid(iter));
 
-  /* Verify first key */
   Lithos_Slice key = Lithos_Iter_Key(iter);
   char expected_key[64];
   snprintf(expected_key, sizeof(expected_key), "key%05d", 0);
@@ -147,7 +128,6 @@ static void Test_TableReader_SeekToFirst(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Iterator Seek to specific key */
 static void Test_TableReader_Seek(void) {
   printf("[TEST] TableReader Seek                        ");
 
@@ -155,7 +135,6 @@ static void Test_TableReader_Seek(void) {
   const char *err = CreateTestTable(filename, 100);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -175,7 +154,6 @@ static void Test_TableReader_Seek(void) {
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Seek to key50 */
   char target[64];
   snprintf(target, sizeof(target), "key%05d", 50);
   Lithos_Slice target_slice = Slice_FromCString(target);
@@ -186,7 +164,6 @@ static void Test_TableReader_Seek(void) {
   Lithos_Slice key = Lithos_Iter_Key(iter);
   ASSERT_TRUE(Slice_Compare(key, target_slice) == 0);
 
-  /* Verify value */
   Lithos_Slice value = Lithos_Iter_Value(iter);
   char expected_value[128];
   snprintf(expected_value, sizeof(expected_value),
@@ -201,7 +178,6 @@ static void Test_TableReader_Seek(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Full scan with Next() */
 static void Test_TableReader_FullScan(void) {
   printf("[TEST] TableReader Full Scan                   ");
 
@@ -210,7 +186,6 @@ static void Test_TableReader_FullScan(void) {
   const char *err = CreateTestTable(filename, num_entries);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -230,7 +205,6 @@ static void Test_TableReader_FullScan(void) {
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Scan all entries */
   int count = 0;
   Lithos_Iter_SeekToFirst(iter);
 
@@ -248,7 +222,6 @@ static void Test_TableReader_FullScan(void) {
 
   ASSERT_TRUE(count == num_entries);
 
-  /* Verify no errors occurred */
   s = Lithos_Iter_GetStatus(iter);
   ASSERT_TRUE(s.code == LITHOS_OK);
 
@@ -260,7 +233,6 @@ static void Test_TableReader_FullScan(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Seek to non-existent key */
 static void Test_TableReader_SeekMissing(void) {
   printf("[TEST] TableReader Seek Missing                ");
 
@@ -268,7 +240,6 @@ static void Test_TableReader_SeekMissing(void) {
   const char *err = CreateTestTable(filename, 100);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -288,14 +259,12 @@ static void Test_TableReader_SeekMissing(void) {
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Seek to key that doesn't exist (between key00049 and key00050) */
   char target[64];
   snprintf(target, sizeof(target), "key00049a");
   Lithos_Slice target_slice = Slice_FromCString(target);
 
   Lithos_Iter_Seek(iter, target_slice);
 
-  /* Should position at next key (key00050) */
   if (Lithos_Iter_Valid(iter)) {
     Lithos_Slice key = Lithos_Iter_Key(iter);
     char expected[64];
@@ -310,17 +279,15 @@ static void Test_TableReader_SeekMissing(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Block boundary crossing with Next() */
 static void Test_TableReader_BlockBoundary(void) {
   printf("[TEST] TableReader Block Boundary              ");
 
   const char *filename = "/tmp/lithos_test_reader_boundary.sst";
-  /* Create table with many entries to force multiple blocks */
+
   int num_entries = 200;
   const char *err = CreateTestTable(filename, num_entries);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -332,7 +299,7 @@ static void Test_TableReader_BlockBoundary(void) {
 
   Lithos_Options options;
   Lithos_Options_InitDefault(&options);
-  options.block_size = 512; // Very small blocks to force boundaries
+  options.block_size = 512;
 
   Lithos_Table *table;
   s = Table_Open(&options, file, file_size, &table);
@@ -341,7 +308,6 @@ static void Test_TableReader_BlockBoundary(void) {
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Scan all entries - this will cross multiple block boundaries */
   int count = 0;
   Lithos_Iter_SeekToFirst(iter);
 
@@ -360,7 +326,6 @@ static void Test_TableReader_BlockBoundary(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Large table with 10,000 entries */
 static void Test_TableReader_LargeTable(void) {
   printf("[TEST] TableReader Large Table (10K)           ");
 
@@ -369,7 +334,6 @@ static void Test_TableReader_LargeTable(void) {
   const char *err = CreateTestTable(filename, num_entries);
   ASSERT_TRUE(err == NULL);
 
-  /* Open table */
   Lithos_RandomAccessFile *file;
   Status s = Env_NewRandomAccessFile(filename, &file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -391,9 +355,8 @@ static void Test_TableReader_LargeTable(void) {
   Lithos_Iterator *iter = Table_NewIterator(table, &options);
   ASSERT_TRUE(iter != NULL);
 
-  /* Test random seeks */
   for (int i = 0; i < 100; i++) {
-    int target_idx = (i * 97) % num_entries; // Pseudo-random
+    int target_idx = (i * 97) % num_entries;
     char target[64];
     snprintf(target, sizeof(target), "key%05d", target_idx);
 
@@ -404,7 +367,6 @@ static void Test_TableReader_LargeTable(void) {
     ASSERT_TRUE(Slice_Compare(key, Slice_FromCString(target)) == 0);
   }
 
-  /* Full scan */
   int count = 0;
   Lithos_Iter_SeekToFirst(iter);
   while (Lithos_Iter_Valid(iter)) {
@@ -423,7 +385,6 @@ static void Test_TableReader_LargeTable(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Main test runner */
 void Run_TableReaderTests(void) {
   Test_TableReader_Open();
   Test_TableReader_SeekToFirst();

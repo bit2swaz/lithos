@@ -1,18 +1,3 @@
-/**
- * Version Edit - Metadata Delta
- * ------------------------------
- * A VersionEdit is a *diff* against the current Version state. Instead of
- * rewriting the full manifest snapshot, we log only the changes:
- *   - AddFile(level, number, bounds)
- *   - DeleteFile(level, number)
- *   - Bump manifest bookkeeping numbers (log_number, next_file_number, ...)
- *
- * The MANIFEST is an append-only journal of these edits. During recovery,
- * we replay every VersionEdit in order to reconstruct the latest Version.
- * This incremental approach keeps manifest writes small and makes the format
- * forward-compatible: new tagged fields can be added without breaking older
- * readers.
- */
 
 #ifndef LITHOS_CORE_VERSION_EDIT_H
 #define LITHOS_CORE_VERSION_EDIT_H
@@ -29,15 +14,14 @@ extern "C" {
 
 #define kNumLevels 7
 
-/* File metadata tracked by the VersionSet */
 typedef struct FileMetaData {
   uint64_t number;
   uint64_t file_size;
-  Lithos_Slice smallest; /* Smallest internal key contained in the file */
-  Lithos_Slice largest;  /* Largest internal key contained in the file */
-  int refs;              /* Reference count; freed when it reaches zero */
-  char *smallest_buf;    /* Owning buffers for the key bounds; copied so they
-                            outlive Arena sources */
+  Lithos_Slice smallest;
+  Lithos_Slice largest;
+  int refs;
+  char *smallest_buf;
+
   char *largest_buf;
 } FileMetaData;
 
@@ -46,19 +30,16 @@ void FileMetaData_Unref(FileMetaData *f);
 FileMetaData *FileMetaData_Create(uint64_t number, uint64_t file_size,
                                   Lithos_Slice smallest, Lithos_Slice largest);
 
-/* Deleted file entry */
 typedef struct DeletedFile {
   int level;
   uint64_t number;
 } DeletedFile;
 
-/* Added file entry */
 typedef struct NewFile {
   int level;
   FileMetaData *file;
 } NewFile;
 
-/* VersionEdit - delta applied to the manifest */
 typedef struct VersionEdit {
   bool has_log_number;
   bool has_prev_log_number;
@@ -92,4 +73,4 @@ Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src);
 }
 #endif
 
-#endif /* LITHOS_CORE_VERSION_EDIT_H */
+#endif

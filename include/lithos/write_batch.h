@@ -1,7 +1,3 @@
-/*
- * WriteBatch: Atomic batch of write operations.
- * Encodes a sequence of puts/deletes into a WAL-friendly binary format.
- */
 
 #ifndef LITHOS_WRITE_BATCH_H
 #define LITHOS_WRITE_BATCH_H
@@ -18,9 +14,9 @@ extern "C" {
 #endif
 
 typedef struct Lithos_WriteBatch {
-  char *rep;       /* Encoded buffer: [seq(8)][count(4)] then records */
-  size_t size;     /* Bytes currently used in rep */
-  size_t capacity; /* Allocated bytes for rep */
+  char *rep;
+  size_t size;
+  size_t capacity;
 } Lithos_WriteBatch;
 
 typedef struct WriteBatchHandler {
@@ -46,4 +42,4 @@ Status WriteBatch_Iterate(const Lithos_WriteBatch *batch,
 }
 #endif
 
-#endif /* LITHOS_WRITE_BATCH_H */
+#endif

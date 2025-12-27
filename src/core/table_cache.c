@@ -1,4 +1,3 @@
-/* TableCache backed by shared LRU Cache of open Table readers. */
 
 #include "core/table_cache.h"
 #include "core/dbformat.h"
@@ -17,7 +16,7 @@ typedef struct {
 struct TableCache {
   char *dbname;
   Lithos_Cache *cache;
-  Lithos_Options options; /* Options used when opening tables */
+  Lithos_Options options;
 };
 
 static void TableCache_Deleter(const Lithos_Slice *key, void *value) {

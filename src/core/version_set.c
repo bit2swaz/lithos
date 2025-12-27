@@ -1,32 +1,3 @@
-/**
- * VersionSet: Manifest + Live Version Manager
- * ===========================================
- *
- * The VersionSet keeps track of every SSTable that makes up the database,
- * along with the MANIFEST log that durably records changes. Think of it as
- * the authoritative catalog of the LSM tree.
- *
- * Core responsibilities:
- * ----------------------
- * 1) Manifest durability: Append VersionEdit deltas to MANIFEST via LogWriter.
- * 2) Snapshot publishing: Build an immutable Version (a consistent view of
- *    all SST files) and install it as current.
- * 3) Lifetime management: Reference-count Versions and FileMetaData so that
- *    readers can hold snapshots while compaction overwrites old files.
- *
- * High-level flow of a Version edit (LogAndApply):
- * ------------------------------------------------
- *   a. Build new Version = current Version + applied delta (add/delete files).
- *   b. Encode and append the VersionEdit to MANIFEST, then flush+sync.
- *   c. Publish: link new Version into the doubly-linked list and drop the
- *      VersionSet's ref on the previous current.
- *
- * Recovery story:
- * ---------------
- * On startup, the DB replays every VersionEdit from MANIFEST to rebuild the
- * latest Version. Each edit is tagged, forward-compatible, and applied in
- * order to produce the same state that existed before the crash.
- */
 
 #include "core/version_set.h"
 #include "core/version_edit.h"
@@ -39,11 +10,11 @@
 
 static double MaxBytesForLevel(int level) {
   if (level <= 0)
-    return 10 * 1024 * 1024.0;      /* unused for L0 score */
-  double base = 10 * 1024 * 1024.0; /* 10MB for L1 */
+    return 10 * 1024 * 1024.0;
+  double base = 10 * 1024 * 1024.0;
   double bytes = base;
   for (int i = 1; i < level; i++) {
-    bytes *= 10.0; /* Li size target: 10^(i) MB */
+    bytes *= 10.0;
   }
   return bytes;
 }
@@ -73,7 +44,7 @@ static Lithos_Version *Version_New(Lithos_VersionSet *set) {
 }
 
 static void VersionLink(Lithos_VersionSet *set, Lithos_Version *v) {
-  /* Insert directly after dummy head. Newest Versions stay near the head. */
+
   v->next = set->dummy_versions->next;
   v->prev = set->dummy_versions;
   set->dummy_versions->next->prev = v;
@@ -81,7 +52,7 @@ static void VersionLink(Lithos_VersionSet *set, Lithos_Version *v) {
 }
 
 static void VersionUnlink(Lithos_Version *v) {
-  /* Remove from circular list; caller ensures list membership. */
+
   v->prev->next = v->next;
   v->next->prev = v->prev;
   v->next = v->prev = NULL;
@@ -132,33 +103,23 @@ static void Version_RemoveFile(Lithos_Version *v, int level, uint64_t number) {
 static Status Version_BuildFromEdit(Lithos_VersionSet *set,
                                     Lithos_Version *base, VersionEdit *edit,
                                     Lithos_Version **out) {
-  /*
-   * Build a new Version by cloning the base snapshot and applying the
-   * delta (additions and deletions). This is purely in-memory; nothing is
-   * persisted until LogAndApply writes the edit to MANIFEST.
-   *
-   * Think of this as "speculatively" building the catalog view we want;
-   * durability is handled later once encoding succeeds.
-   */
+
   Lithos_Version *v = Version_New(set);
   if (v == NULL) {
     return Status_IOError("alloc version", NULL);
   }
 
-  /* Copy base files */
   for (int level = 0; level < kNumLevels; level++) {
     for (size_t i = 0; i < base->file_counts[level]; i++) {
       Version_AddFile(v, level, base->files[level][i]);
     }
   }
 
-  /* Apply deletions */
   for (size_t i = 0; i < edit->deleted_files_count; i++) {
     Version_RemoveFile(v, edit->deleted_files[i].level,
                        edit->deleted_files[i].number);
   }
 
-  /* Apply additions */
   for (size_t i = 0; i < edit->new_files_count; i++) {
     Version_AddFile(v, edit->new_files[i].level, edit->new_files[i].file);
   }
@@ -168,7 +129,7 @@ static Status Version_BuildFromEdit(Lithos_VersionSet *set,
 }
 
 Lithos_VersionSet *VersionSet_Create(const char *dbname) {
-  /* Initialize VersionSet with an empty current Version and a MANIFEST. */
+
   Lithos_VersionSet *set = calloc(1, sizeof(Lithos_VersionSet));
   if (set == NULL)
     return NULL;
@@ -177,23 +138,19 @@ Lithos_VersionSet *VersionSet_Create(const char *dbname) {
   set->next_file_number = 2;
   set->table_cache = TableCache_Create(dbname, 1024);
 
-  /* Create dummy version list head */
   set->dummy_versions = Version_New(set);
   set->dummy_versions->next = set->dummy_versions->prev = set->dummy_versions;
 
-  /* Initialize current version */
   set->current = Version_New(set);
   set->current->next = set->current->prev = NULL;
   Version_Ref(
-      set->current); /* VersionSet owns one ref to the current Version. */
+      set->current);
   VersionLink(set, set->current);
 
-  /* Ensure DB directory exists */
   if (set->dbname != NULL && set->dbname[0] != '\0') {
     mkdir(set->dbname, 0755);
   }
 
-  /* Open MANIFEST file */
   char manifest_name[512];
   if (set->dbname != NULL && set->dbname[0] != '\0') {
     snprintf(manifest_name, sizeof(manifest_name), "%s/MANIFEST-%06llu",
@@ -212,7 +169,7 @@ Lithos_VersionSet *VersionSet_Create(const char *dbname) {
 }
 
 static void Version_Destroy(Lithos_Version *v) {
-  /* Drop file refs held by this Version snapshot and free its storage. */
+
   for (int level = 0; level < kNumLevels; level++) {
     for (size_t i = 0; i < v->file_counts[level]; i++) {
       FileMetaData_Unref(v->files[level][i]);
@@ -255,22 +212,14 @@ Status VersionSet_LogAndApply(Lithos_VersionSet *set, VersionEdit *edit) {
   }
 
   Lithos_Version *new_version = NULL;
-  /*
-   * Step 1: Build the next Version snapshot in memory.
-   * Clone current, then add/delete files according to the VersionEdit delta.
-   */
+
   Status s = Version_BuildFromEdit(set, set->current, edit, &new_version);
   if (!Status_IsOK(s)) {
     return s;
   }
 
   Lithos_Slice record;
-  /*
-   * Step 2: Durability first. Encode and append the VersionEdit to the
-   * MANIFEST so that recovery can replay this exact change after a crash.
-   * We sync immediately to guarantee the manifest is durable before
-   * publishing the new Version pointer.
-   */
+
   s = VersionEdit_EncodeTo(edit, &record);
   if (!Status_IsOK(s)) {
     Version_Destroy(new_version);
@@ -288,26 +237,14 @@ Status VersionSet_LogAndApply(Lithos_VersionSet *set, VersionEdit *edit) {
 
   free((void *)record.data);
 
-  /*
-   * Step 3: Publish the new snapshot. VersionSet keeps one ref to the
-   * current Version; iterators and clients may hold additional refs. Once
-   * we swap, we drop our ref to the old Version—if no one else holds it,
-   * it gets destroyed along with any unreferenced FileMetaData.
-   */
-  Version_Ref(new_version); /* Owned by VersionSet as the new current. */
+  Version_Ref(new_version);
   VersionLink(set, new_version);
 
   Lithos_Version *old = set->current;
   set->current = new_version;
   Version_Unref(
-      old); /* Release VersionSet's reference to the previous current. */
+      old);
 
-  /*
-   * Ownership of FileMetaData entries moves into the Version graph above.
-   * Clear the VersionEdit bookkeeping so later VersionEdit_Clear calls
-   * don't walk pointers that may already be freed when versions are
-   * destroyed (avoids double-free/use-after-free in tests).
-   */
   for (size_t i = 0; i < edit->new_files_count; i++) {
     edit->new_files[i].file = NULL;
   }
@@ -319,7 +256,7 @@ Status VersionSet_LogAndApply(Lithos_VersionSet *set, VersionEdit *edit) {
 
 void Version_Ref(Lithos_Version *v) {
   if (v != NULL) {
-    v->refs++; /* Ownership retained by caller (VersionSet, iterator, etc.). */
+    v->refs++;
   }
 }
 
@@ -327,7 +264,7 @@ void Version_Unref(Lithos_Version *v) {
   if (v == NULL)
     return;
   assert(v->refs > 0);
-  v->refs--; /* Release caller's ownership; may trigger destruction. */
+  v->refs--;
   if (v->refs == 0) {
     VersionUnlink(v);
     Version_Destroy(v);
@@ -404,11 +341,10 @@ Lithos_Compaction *VersionSet_PickCompaction(Lithos_VersionSet *set) {
   c->level = best_level;
 
   if (v->file_counts[best_level] > 0) {
-    /* Simple pick: the first file in level */
+
     Compaction_AddInput(c, 0, v->files[best_level][0]);
   }
 
-  /* Add overlapping files from level+1; detect trivial move when none. */
   if (c->input_count[0] > 0) {
     FileMetaData *f = c->inputs[0][0];
     Lithos_Slice small = ExtractUserKey(f->smallest);
@@ -456,7 +392,7 @@ Status Version_Get(Lithos_Version *v, const Lithos_ReadOptions *options,
   }
 
   TableCache *cache = v->vset->table_cache;
-  /* Level iteration: L0 overlaps (search newest to oldest), L1+ disjoint. */
+
   for (int level = 0; level < kNumLevels; level++) {
     size_t count = v->file_counts[level];
     if (count == 0)

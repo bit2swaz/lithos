@@ -1,4 +1,3 @@
-/* Merging iterator: K-way merge over child iterators. */
 
 #include "core/table/merger.h"
 #include "core/dbformat.h"
@@ -9,7 +8,7 @@
 typedef struct {
   Lithos_Iterator **children;
   int num;
-  int current; /* index of child holding the smallest key */
+  int current;
   int (*cmp)(const void *, const void *);
   Status status;
 } MergingIterator;
@@ -54,7 +53,7 @@ static void Merging_SeekToLast(void *state) {
     if (m->children[i])
       Lithos_Iter_SeekToLast(m->children[i]);
   }
-  /* Choose max key */
+
   m->current = -1;
   for (int i = 0; i < m->num; i++) {
     if (m->children[i] && Lithos_Iter_Valid(m->children[i])) {
@@ -91,7 +90,7 @@ static void Merging_Prev(void *state) {
   MergingIterator *m = (MergingIterator *)state;
   assert(Merging_Valid(state));
   Lithos_Iter_Prev(m->children[m->current]);
-  /* After moving current child back, choose max key among valids. */
+
   m->current = -1;
   for (int i = 0; i < m->num; i++) {
     if (m->children[i] && Lithos_Iter_Valid(m->children[i])) {

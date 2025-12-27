@@ -1,18 +1,3 @@
-/**
- * VersionSet Interface - Catalog of SST Versions
- * ==============================================
- *
- * A Version is an immutable snapshot of all SST files across levels. The
- * VersionSet owns the MANIFEST (log of VersionEdit deltas) and the linked list
- * of live Versions. Reference counting keeps older Versions alive while
- * iterators read them, enabling snapshot isolation without blocking writes.
- *
- * Roles:
- * - Manifest persistence: append VersionEdit deltas via LogAndApply.
- * - Snapshot publishing: build a new Version from (current + delta) and swap.
- * - Lifetime management: Ref/Unref protects Files and Versions from premature
- *   deletion while readers hold references.
- */
 
 #ifndef LITHOS_CORE_VERSION_SET_H
 #define LITHOS_CORE_VERSION_SET_H
@@ -40,11 +25,10 @@ struct Lithos_Version {
   Lithos_VersionSet *vset;
   Lithos_Version *next;
   Lithos_Version *prev;
-  int refs; /* External references (iterators, VersionSet current) keep this
-               alive. */
-  /* Snapshot semantics: immutable, consistent view of all SSTables. */
-  FileMetaData **files[kNumLevels]; /* Per-level ordered file lists forming a
-                                       snapshot view. */
+  int refs;
+
+  FileMetaData **files[kNumLevels];
+
   size_t file_counts[kNumLevels];
   size_t file_caps[kNumLevels];
 };
@@ -70,7 +54,7 @@ void Compaction_Destroy(Lithos_Compaction *c);
 
 struct Lithos_Compaction {
   Lithos_VersionSet *vset;
-  int level; /* Inputs are level and level+1 */
+  int level;
   FileMetaData **inputs[2];
   size_t input_count[2];
   bool trivial_move;
@@ -86,4 +70,4 @@ Status Version_Get(Lithos_Version *v, const Lithos_ReadOptions *options,
 }
 #endif
 
-#endif /* LITHOS_CORE_VERSION_SET_H */
+#endif

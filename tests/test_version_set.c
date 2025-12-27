@@ -1,10 +1,3 @@
-/**
- * VersionSet tests
- * ----------------
- * These tests exercise manifest edit serialization, application of edits
- * to build new Versions, and the refcounting model that keeps historical
- * Versions alive while readers hold references.
- */
 
 #include "core/version_edit.h"
 #include "core/version_set.h"
@@ -15,13 +8,6 @@
 
 void Run_VersionSetTests(void);
 
-/*
- * Test_EditSerialization
- * ----------------------
- * Verifies tag-based encode/decode round-trips:
- * - A set of fields (log numbers, next file number) is preserved.
- * - Added/deleted files survive serialization with their metadata intact.
- */
 static void Test_EditSerialization(void) {
   printf("[TEST] VersionEdit Serialization              ");
   VersionEdit edit;
@@ -62,14 +48,6 @@ static void Test_EditSerialization(void) {
   printf("\n");
 }
 
-/*
- * Test_VersionSetApply
- * --------------------
- * Applies two edits in sequence and checks that:
- * - A newly added file becomes visible in current->files.
- * - A subsequent edit that deletes the old file and adds another replaces it
- *   in the Version snapshot.
- */
 static void Test_VersionSetApply(void) {
   printf("[TEST] VersionSet Apply                       ");
   VersionEdit edit1;
@@ -101,13 +79,6 @@ static void Test_VersionSetApply(void) {
   printf("\n");
 }
 
-/*
- * Test_VersionRefCounting
- * -----------------------
- * Ensures that an older Version remains alive while a caller holds a ref,
- * even after a newer Version becomes current. Once the ref is released,
- * the old Version is unlinked and destroyed.
- */
 static void Test_VersionRefCounting(void) {
   printf("[TEST] Version Ref Counting                   ");
   Lithos_VersionSet *vs = VersionSet_Create("/tmp/lithos_vs_ref");
@@ -128,7 +99,7 @@ static void Test_VersionRefCounting(void) {
                       Slice_FromCString("d"));
   ASSERT_OK(VersionSet_LogAndApply(vs, &e2));
 
-  ASSERT_TRUE(v1->refs == 1); /* held by our ref */
+  ASSERT_TRUE(v1->refs == 1);
   Version_Unref(v1);
 
   ASSERT_TRUE(vs->dummy_versions->next != v1);

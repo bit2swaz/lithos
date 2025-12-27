@@ -1,7 +1,6 @@
 #include "util/compression.h"
 #include <string.h>
 
-/* Marker byte used to denote an RLE run. Chosen to be rare and explicit. */
 #define LITHOS_RLE_MARKER 0xFF
 
 bool Lithos_Compress(const char *src, size_t src_len, char *dst,
@@ -17,7 +16,6 @@ bool Lithos_Compress(const char *src, size_t src_len, char *dst,
   while (i < src_len) {
     unsigned char byte = (unsigned char)src[i];
 
-    /* Count run length up to 255 to fit in one byte. */
     size_t run = 1;
     while (i + run < src_len && (unsigned char)src[i + run] == byte &&
            run < 255) {
@@ -27,10 +25,10 @@ bool Lithos_Compress(const char *src, size_t src_len, char *dst,
     bool encode_run = (byte == LITHOS_RLE_MARKER) || (run >= 4);
     if (encode_run) {
       if (out + 3 > capacity) {
-        return false; /* Not enough space */
+        return false;
       }
       dst[out++] = (char)LITHOS_RLE_MARKER;
-      dst[out++] = (char)run; /* 1..255 */
+      dst[out++] = (char)run;
       dst[out++] = (char)byte;
     } else {
       if (out + run > capacity) {
@@ -60,15 +58,15 @@ bool Lithos_Uncompress(const char *src, size_t src_len, char *dst,
     unsigned char byte = (unsigned char)src[in++];
     if (byte == LITHOS_RLE_MARKER) {
       if (in + 1 >= src_len) {
-        return false; /* Missing count or value */
+        return false;
       }
       unsigned char count = (unsigned char)src[in++];
       unsigned char value = (unsigned char)src[in++];
       if (count == 0) {
-        return false; /* Invalid run length */
+        return false;
       }
       if (out + count > dst_len) {
-        return false; /* Output buffer too small */
+        return false;
       }
       memset(dst + out, value, count);
       out += count;

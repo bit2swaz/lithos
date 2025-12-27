@@ -1,4 +1,3 @@
-/* Minimal read options placeholder. */
 
 #ifndef LITHOS_READ_OPTIONS_H
 #define LITHOS_READ_OPTIONS_H
@@ -8,7 +7,7 @@ extern "C" {
 #endif
 
 typedef struct Lithos_ReadOptions {
-  const void *snapshot; /* reserved for future snapshot support */
+  const void *snapshot;
 } Lithos_ReadOptions;
 
 static inline Lithos_ReadOptions Lithos_ReadOptions_Default(void) {
@@ -21,4 +20,4 @@ static inline Lithos_ReadOptions Lithos_ReadOptions_Default(void) {
 }
 #endif
 
-#endif /* LITHOS_READ_OPTIONS_H */
+#endif

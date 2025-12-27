@@ -1,12 +1,3 @@
-/*
- * test_table_builder.c - Comprehensive TableBuilder Tests
- *
- * Validates SSTable file construction including:
- * - Data block flushing at 4KB boundaries
- * - Index block generation
- * - Footer with magic number
- * - File format integrity
- */
 
 #include "all_tests.h"
 #include "core/table/format.h"
@@ -20,12 +11,11 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Test: Create empty table */
 static void Test_TableBuilder_Empty(void) {
   printf("[TEST] TableBuilder Empty                      ");
 
   const char *filename = "/tmp/lithos_test_empty.sst";
-  unlink(filename); // Clean up if exists
+  unlink(filename);
 
   Lithos_WritableFile *file;
   Status s = Env_NewWritableFile(filename, &file);
@@ -37,7 +27,6 @@ static void Test_TableBuilder_Empty(void) {
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
 
-  /* Finish without adding any entries */
   lithos_status_code status = TableBuilder_Finish(tb);
   ASSERT_TRUE(status == LITHOS_OK);
 
@@ -47,7 +36,6 @@ static void Test_TableBuilder_Empty(void) {
   TableBuilder_Destroy(tb);
   WritableFile_Close(file);
 
-  /* Verify footer at end of file */
   FILE *fp = fopen(filename, "rb");
   ASSERT_TRUE(fp != NULL);
 
@@ -55,13 +43,11 @@ static void Test_TableBuilder_Empty(void) {
   long actual_size = ftell(fp);
   ASSERT_TRUE((uint64_t)actual_size == file_size);
 
-  /* Read footer (last 48 bytes) */
   fseek(fp, -LITHOS_FOOTER_ENCODED_LENGTH, SEEK_END);
   char footer_buf[LITHOS_FOOTER_ENCODED_LENGTH];
   size_t n = fread(footer_buf, 1, LITHOS_FOOTER_ENCODED_LENGTH, fp);
   ASSERT_TRUE(n == LITHOS_FOOTER_ENCODED_LENGTH);
 
-  /* Verify magic number */
   uint64_t magic = DecodeFixed64(footer_buf + LITHOS_FOOTER_ENCODED_LENGTH - 8);
   ASSERT_TRUE(magic == LITHOS_TABLE_MAGIC_NUMBER);
 
@@ -71,7 +57,6 @@ static void Test_TableBuilder_Empty(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Add single entry */
 static void Test_TableBuilder_SingleEntry(void) {
   printf("[TEST] TableBuilder Single Entry               ");
 
@@ -109,7 +94,6 @@ static void Test_TableBuilder_SingleEntry(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Multiple entries in single block */
 static void Test_TableBuilder_MultipleEntries(void) {
   printf("[TEST] TableBuilder Multiple Entries           ");
 
@@ -126,7 +110,6 @@ static void Test_TableBuilder_MultipleEntries(void) {
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
 
-  /* Add 100 sorted entries */
   for (int i = 0; i < 100; i++) {
     char key[64], value[64];
     snprintf(key, sizeof(key), "key%05d", i);
@@ -154,7 +137,6 @@ static void Test_TableBuilder_MultipleEntries(void) {
   printf("✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Force multiple data blocks */
 static void Test_TableBuilder_MultipleBlocks(void) {
   printf("[TEST] TableBuilder Multiple Blocks            ");
 
@@ -167,12 +149,11 @@ static void Test_TableBuilder_MultipleBlocks(void) {
 
   Lithos_Options options;
   Lithos_Options_InitDefault(&options);
-  options.block_size = 1024; // Small blocks to force multiple flushes
+  options.block_size = 1024;
 
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
 
-  /* Add entries with large values to fill blocks quickly */
   char large_value[512];
   memset(large_value, 'v', sizeof(large_value));
   large_value[511] = '\0';
@@ -195,7 +176,7 @@ static void Test_TableBuilder_MultipleBlocks(void) {
 
   uint64_t file_size = TableBuilder_FileSize(tb);
   ASSERT_TRUE(file_size >
-              10000); // Should be significant with 50 * 512-byte values
+              10000);
 
   printf("  File size: %lu bytes\n", (unsigned long)file_size);
 
@@ -207,7 +188,6 @@ static void Test_TableBuilder_MultipleBlocks(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Large table with many entries */
 static void Test_TableBuilder_LargeTable(void) {
   printf("[TEST] TableBuilder Large Table (10K entries)  ");
 
@@ -224,7 +204,6 @@ static void Test_TableBuilder_LargeTable(void) {
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
 
-  /* Add 10,000 entries */
   int num_entries = 10000;
   for (int i = 0; i < num_entries; i++) {
     char key[64], value[128];
@@ -244,7 +223,7 @@ static void Test_TableBuilder_LargeTable(void) {
   ASSERT_TRUE(status == LITHOS_OK);
 
   uint64_t file_size = TableBuilder_FileSize(tb);
-  ASSERT_TRUE(file_size > 100000); // Should be > 100KB
+  ASSERT_TRUE(file_size > 100000);
 
   printf("  File size: %lu bytes, Entries: %lu\n", (unsigned long)file_size,
          (unsigned long)TableBuilder_NumEntries(tb));
@@ -252,7 +231,6 @@ static void Test_TableBuilder_LargeTable(void) {
   TableBuilder_Destroy(tb);
   WritableFile_Close(file);
 
-  /* Verify footer with magic number */
   FILE *fp = fopen(filename, "rb");
   ASSERT_TRUE(fp != NULL);
 
@@ -261,7 +239,6 @@ static void Test_TableBuilder_LargeTable(void) {
   size_t n = fread(footer_buf, 1, LITHOS_FOOTER_ENCODED_LENGTH, fp);
   ASSERT_TRUE(n == LITHOS_FOOTER_ENCODED_LENGTH);
 
-  /* Decode and verify footer */
   Lithos_Footer footer;
   lithos_status_code decode_status = Footer_Decode(&footer, footer_buf);
   ASSERT_TRUE(decode_status == LITHOS_OK);
@@ -278,7 +255,6 @@ static void Test_TableBuilder_LargeTable(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Test: Compression round-trip using RLE */
 static void Test_TableBuilder_Compression(void) {
   printf("[TEST] TableBuilder Compression (RLE)         ");
 
@@ -293,7 +269,7 @@ static void Test_TableBuilder_Compression(void) {
   Lithos_Options_InitDefault(&options);
   options.compression_enabled = true;
   options.block_size =
-      512; // Small blocks to exercise multiple compressed blocks
+      512;
 
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
@@ -317,7 +293,6 @@ static void Test_TableBuilder_Compression(void) {
   TableBuilder_Destroy(tb);
   WritableFile_Close(file);
 
-  /* Open the table and verify contents */
   Lithos_RandomAccessFile *ra_file;
   s = Env_NewRandomAccessFile(filename, &ra_file);
   ASSERT_TRUE(s.code == LITHOS_OK);
@@ -359,7 +334,6 @@ static void Test_TableBuilder_Compression(void) {
   printf("  ✓ (%d assertions)\n", test_passed);
 }
 
-/* Main test runner for TableBuilder */
 void Run_TableBuilderTests(void) {
   Test_TableBuilder_Empty();
   Test_TableBuilder_SingleEntry();

@@ -1,25 +1,3 @@
-/*
- * LRU Cache: Fast In-Memory Storage for SSTable Blocks
- * ===================================================
- * Implements a sharded LRU cache to keep frequently accessed SSTable data
- * blocks in memory, reducing disk I/O for hot data.
- *
- * Big Picture: Block Cache = "Memory as Fast Disk Extension"
- * =========================================================
- * SSTables are large files on disk. Reading a 4KB block takes milliseconds.
- * The block cache keeps recently used blocks in RAM for instant access.
- * This is crucial for performance: hot data stays in memory, cold data
- * gets evicted to make room.
- *
- * Where it fits: SSTable readers check the cache before reading from disk.
- * The cache is shared across all open SSTables in the database.
- *
- * Key Concepts:
- * - Sharding: 16-way sharding reduces lock contention for concurrent access.
- * - LRU eviction: Least Recently Used blocks are evicted when cache is full.
- * - Reference counting: Handles can be held by multiple threads safely.
- * - Handle table: Hash table maps keys to cache entries.
- */
 
 #include "lithos/cache.h"
 #include <assert.h>
@@ -28,12 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Number of shards in the cache */
 #define NUM_SHARDS 16
 
-/* ========================================================================
- * MurmurHash2 - Fast hash function for sharding and key hashing
- * ======================================================================== */
+#if defined(__GNUC__) && __GNUC__ >= 7
+#define LITHOS_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define LITHOS_FALLTHROUGH ((void)0)
+#endif
 
 static uint32_t MurmurHash(const void *key, size_t len, uint32_t seed) {
   const uint32_t m = 0x5bd1e995;
@@ -54,9 +33,11 @@ static uint32_t MurmurHash(const void *key, size_t len, uint32_t seed) {
 
   switch (len) {
   case 3:
-    h ^= data[2] << 16; /* fallthrough */
+    h ^= data[2] << 16;
+    LITHOS_FALLTHROUGH;
   case 2:
-    h ^= data[1] << 8; /* fallthrough */
+    h ^= data[1] << 8;
+    LITHOS_FALLTHROUGH;
   case 1:
     h ^= data[0];
     h *= m;
@@ -73,28 +54,17 @@ static uint32_t HashSlice(Lithos_Slice key) {
   return MurmurHash(key.data, key.size, 0);
 }
 
-/* ========================================================================
- * LRUHandle - Cache entry
- * ======================================================================== */
-
-/*
- * LRUHandle: Cache entry with embedded key and LRU list links.
- * ===========================================================
- * Each cached item is stored in an LRUHandle. The key is embedded at the end
- * of the struct for memory efficiency (struct hack). Reference counting allows
- * safe concurrent access.
- */
 typedef struct LRUHandle {
-  void *value;                 // The cached data (e.g., SSTable block bytes)
-  CacheDeleter deleter;        // Function to free the value when evicted
-  struct LRUHandle *next_hash; // Next in hash table collision chain
-  struct LRUHandle *next;      // Next in LRU list (more recently used)
-  struct LRUHandle *prev;      // Previous in LRU list (less recently used)
-  size_t charge;               // Memory cost of this entry (for size limits)
-  size_t key_length;           // Length of the embedded key
-  uint32_t refs;               // Reference count (0 = evictable, >0 = pinned)
-  uint32_t hash;               // Cached hash of the key
-  char key_data[1];            // Variable-length key data (struct hack)
+  void *value;
+  CacheDeleter deleter;
+  struct LRUHandle *next_hash;
+  struct LRUHandle *next;
+  struct LRUHandle *prev;
+  size_t charge;
+  size_t key_length;
+  uint32_t refs;
+  uint32_t hash;
+  char key_data[1];
 } LRUHandle;
 
 static Lithos_Slice Handle_Key(const LRUHandle *h) {
@@ -102,14 +72,10 @@ static Lithos_Slice Handle_Key(const LRUHandle *h) {
   return s;
 }
 
-/* ========================================================================
- * HandleTable - Resizeable hash table
- * ======================================================================== */
-
 typedef struct HandleTable {
-  LRUHandle **list; /* Array of pointers to LRUHandle */
-  uint32_t length;  /* Size of the array */
-  uint32_t elems;   /* Number of elements */
+  LRUHandle **list;
+  uint32_t length;
+  uint32_t elems;
 } HandleTable;
 
 static HandleTable *HandleTable_Create(void) {
@@ -179,24 +145,22 @@ static LRUHandle *HandleTable_Insert(HandleTable *table, LRUHandle *h) {
   LRUHandle **ptr = &table->list[h->hash & (table->length - 1)];
   LRUHandle *old = NULL;
 
-  /* Search for existing entry with same key */
   while (*ptr != NULL && ((*ptr)->hash != h->hash ||
                           !Slice_Equal(Handle_Key(*ptr), Handle_Key(h)))) {
     ptr = &(*ptr)->next_hash;
   }
 
   if (*ptr != NULL) {
-    /* Replace existing entry */
+
     old = *ptr;
     h->next_hash = old->next_hash;
     *ptr = h;
   } else {
-    /* Insert new entry */
+
     h->next_hash = table->list[h->hash & (table->length - 1)];
     table->list[h->hash & (table->length - 1)] = h;
     table->elems++;
 
-    /* Resize if load factor > 1 */
     if (table->elems > table->length) {
       HandleTable_Resize(table);
     }
@@ -205,17 +169,11 @@ static LRUHandle *HandleTable_Insert(HandleTable *table, LRUHandle *h) {
   return old;
 }
 
-/* ========================================================================
- * LRUCache - Single shard
- * ======================================================================== */
-
 typedef struct LRUCache {
   pthread_mutex_t mutex;
   size_t capacity;
   size_t usage;
 
-  /* Dummy head of LRU list */
-  /* lru.prev is newest entry, lru.next is oldest entry */
   LRUHandle lru;
 
   HandleTable *table;
@@ -249,7 +207,6 @@ static void LRUCache_FinishErase(LRUCache *cache, LRUHandle *e) {
     LRU_Remove(e);
     cache->usage -= e->charge;
 
-    /* Unref - will free if refs == 1 */
     assert(e->refs > 0);
     e->refs--;
     if (e->refs == 0) {
@@ -268,7 +225,7 @@ static Lithos_CacheHandle *LRUCache_Lookup(LRUCache *cache, Lithos_Slice key,
   LRUHandle *e = HandleTable_Lookup(cache->table, key, hash);
   if (e != NULL) {
     e->refs++;
-    /* Move to front of LRU list (most recently used) */
+
     LRU_Remove(e);
     LRU_Append(&cache->lru, e);
   }
@@ -282,39 +239,35 @@ static Lithos_CacheHandle *LRUCache_Insert(LRUCache *cache, Lithos_Slice key,
                                            CacheDeleter deleter) {
   pthread_mutex_lock(&cache->mutex);
 
-  /* Allocate handle with variable-length key */
   LRUHandle *e = malloc(sizeof(LRUHandle) - 1 + key.size);
   e->value = value;
   e->deleter = deleter;
   e->charge = charge;
   e->key_length = key.size;
   e->hash = hash;
-  e->refs = 2; /* One for cache, one for caller */
+  e->refs = 2;
   memcpy(e->key_data, key.data, key.size);
 
   cache->usage += charge;
 
-  /* Insert into hash table */
   LRUHandle *old = HandleTable_Insert(cache->table, e);
 
-  /* Add to LRU list (most recently used end) */
   LRU_Append(&cache->lru, e);
 
   if (old != NULL) {
     LRUCache_FinishErase(cache, old);
   }
 
-  /* Evict old entries if over capacity */
   while (cache->usage > cache->capacity && cache->lru.next != &cache->lru) {
-    LRUHandle *old_entry = cache->lru.next; /* Oldest entry */
+    LRUHandle *old_entry = cache->lru.next;
     if (old_entry->refs == 1) {
-      /* Only in cache, not in use by caller */
+
       LRUHandle *removed = HandleTable_Remove(
           cache->table, Handle_Key(old_entry), old_entry->hash);
       assert(removed == old_entry);
       LRUCache_FinishErase(cache, old_entry);
     } else {
-      /* In use by caller, can't evict yet */
+
       break;
     }
   }
@@ -328,7 +281,7 @@ static void LRUCache_Release(LRUCache *cache, Lithos_CacheHandle *handle) {
   LRUHandle *e = (LRUHandle *)handle;
   assert(e->refs > 0);
   e->refs--;
-  /* Entry stays in cache until evicted */
+
   pthread_mutex_unlock(&cache->mutex);
 }
 
@@ -347,13 +300,11 @@ static size_t LRUCache_TotalCharge(LRUCache *cache) {
 }
 
 static void LRUCache_Destroy(LRUCache *cache) {
-  /* All external handles must be released before destroying */
-  /* Entries in LRU list should have refs == 1 */
+
   for (LRUHandle *e = cache->lru.next; e != &cache->lru;) {
     LRUHandle *next = e->next;
-    assert(e->refs == 1); /* Only cache reference */
+    assert(e->refs == 1);
 
-    /* Free the entry */
     Lithos_Slice key = Handle_Key(e);
     if (e->deleter) {
       e->deleter(&key, e->value);
@@ -366,20 +317,12 @@ static void LRUCache_Destroy(LRUCache *cache) {
   free(cache);
 }
 
-/* ========================================================================
- * ShardedLRUCache - Top-level cache with 16 shards
- * ======================================================================== */
-
 typedef struct ShardedLRUCache {
   LRUCache *shards[NUM_SHARDS];
   atomic_uint_fast64_t last_id;
 } ShardedLRUCache;
 
 static uint32_t Shard(uint32_t hash) { return hash % NUM_SHARDS; }
-
-/* ========================================================================
- * Public API
- * ======================================================================== */
 
 Lithos_Cache *NewLRUCache(size_t capacity) {
   ShardedLRUCache *cache = malloc(sizeof(ShardedLRUCache));

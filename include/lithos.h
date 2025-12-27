@@ -1,4 +1,4 @@
-/* Public one-stop header for Lithos. */
+
 #ifndef LITHOS_H
 #define LITHOS_H
 
@@ -35,4 +35,4 @@ void Lithos_Free(void *ptr);
 }
 #endif
 
-#endif /* LITHOS_H */
+#endif

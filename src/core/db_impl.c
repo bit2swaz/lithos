@@ -1,4 +1,3 @@
-/* Minimal DB implementation: WAL + MemTable with crash recovery. */
 
 #include "core/dbformat.h"
 #include "core/log_reader.h"
@@ -28,7 +27,7 @@ typedef struct Lithos_Snapshot {
 } Lithos_Snapshot;
 
 typedef struct SnapshotList {
-  Lithos_Snapshot head; /* sentinel node */
+  Lithos_Snapshot head;
 } SnapshotList;
 
 struct Lithos_DB {
@@ -62,7 +61,7 @@ static char *DupString(const char *src) {
 }
 
 static char *WalFileName(const char *dbname) {
-  size_t n = strlen(dbname) + 9; /* "/" + wal.log + nul */
+  size_t n = strlen(dbname) + 9;
   char *buf = malloc(n);
   if (buf == NULL)
     return NULL;
@@ -71,7 +70,7 @@ static char *WalFileName(const char *dbname) {
 }
 
 static char *ImmWalFileName(const char *dbname) {
-  size_t n = strlen(dbname) + 13; /* "/" + wal.log.imm + nul */
+  size_t n = strlen(dbname) + 13;
   char *buf = malloc(n);
   if (buf == NULL)
     return NULL;
@@ -118,7 +117,7 @@ static Lithos_Snapshot *SnapshotList_New(SnapshotList *list,
   if (s == NULL)
     return NULL;
   s->sequence = seq;
-  /* Insert at front: newest snapshots near head, tail holds oldest. */
+
   s->next = list->head.next;
   s->prev = &list->head;
   list->head.next->prev = s;
@@ -145,7 +144,7 @@ static void SnapshotList_Remove(SnapshotList *list, Lithos_Snapshot *s) {
 static SequenceNumber SnapshotList_Oldest(const SnapshotList *list,
                                           SequenceNumber current_seq) {
   if (SnapshotList_Empty(list))
-    return current_seq + 1; /* No snapshots → allow full pruning. */
+    return current_seq + 1;
   return list->head.prev->sequence;
 }
 
@@ -175,7 +174,7 @@ static Lithos_Slice EncodeInternalKey(Lithos_Slice user_key, SequenceNumber seq,
   return Slice_Create(buf, needed);
 }
 
-static const size_t kWriteBufferSize = 4 * 1024 * 1024; /* 4MB buffer target */
+static const size_t kWriteBufferSize = 4 * 1024 * 1024;
 
 static Lithos_Slice EntryInternalKey(const Lithos_Slice *encoded) {
   const char *p = encoded->data;
@@ -325,8 +324,7 @@ static Status CompactMemTable(Lithos_DB *db) {
   Status s = WriteLevel0Table(db, imm, &meta, &fname);
 
   if (meta != NULL) {
-    /* Hold a worker ref so we can cleanly drop ownership regardless of apply
-     * outcome. */
+
     FileMetaData_Ref(meta);
   }
 
@@ -357,16 +355,15 @@ static Status CompactMemTable(Lithos_DB *db) {
     if (imm_log != NULL && db->imm_log_filename == NULL) {
       db->imm_log_filename = imm_log;
     }
-    /* meta is not owned by VersionSet on failure, free it here. */
+
     if (meta != NULL) {
       FileMetaData_Unref(meta);
     }
-    /* Drop the worker's ref; ownership stays with db->imm for retry. */
+
     MemTable_Unref(imm);
     return apply_status;
   }
 
-  /* Success: drop worker ref and then the DB's ownership ref. */
   MemTable_Unref(imm);
   db->imm = NULL;
   MemTable_Unref(imm);
@@ -397,7 +394,7 @@ static bool KeyExistsInHigherLevels(Lithos_Compaction *c,
   if (c == NULL || c->vset == NULL || c->vset->current == NULL)
     return false;
   Lithos_Version *v = c->vset->current;
-  int level = c->level + 2; /* check levels above output */
+  int level = c->level + 2;
   for (; level < kNumLevels; level++) {
     for (size_t i = 0; i < v->file_counts[level]; i++) {
       if (UserKeyInFile(v->files[level][i], user_key)) {
@@ -412,7 +409,6 @@ static Status DoCompactionWork(Lithos_DB *db, Lithos_Compaction *c) {
   if (c == NULL)
     return Status_OK();
 
-  /* Trivial move: just rewrite metadata without I/O. */
   if (c->trivial_move && c->input_count[0] == 1 && c->input_count[1] == 0) {
     VersionEdit edit;
     VersionEdit_Init(&edit);
@@ -426,7 +422,6 @@ static Status DoCompactionWork(Lithos_DB *db, Lithos_Compaction *c) {
     return s;
   }
 
-  /* Build child iterators */
   int total_inputs = (int)(c->input_count[0] + c->input_count[1]);
   if (total_inputs == 0)
     return Status_OK();
@@ -526,8 +521,8 @@ static Status DoCompactionWork(Lithos_DB *db, Lithos_Compaction *c) {
     bool drop = false;
 
     if (!is_new_user && last_sequence_for_key <= smallest_snapshot) {
-      drop = true; /* Older than any needed snapshot; newer version already
-                      seen. */
+      drop = true;
+
     }
 
     if (!drop && parsed.type == kTypeDeletion &&
@@ -605,7 +600,6 @@ done:
       DeleteFileQuietly(outname);
   }
 
-  /* Build and apply VersionEdit */
   if (Status_IsOK(s) && meta != NULL) {
     VersionEdit edit;
     VersionEdit_Init(&edit);
@@ -625,7 +619,6 @@ done:
     }
   }
 
-  /* Cleanup */
   Lithos_Iter_Destroy(merge);
   for (int i = 0; i < total_inputs; i++) {
     if (child_iters[i])
@@ -662,8 +655,6 @@ static void MaybeScheduleCompaction(Lithos_DB *db) {
     return;
   }
 
-  /* Join any finished background thread before starting another to keep LSAN
-   * happy. */
   if (db->bg_thread_valid && !db->bg_running) {
     pthread_join(db->bg_thread, NULL);
     db->bg_thread_valid = false;
@@ -1040,14 +1031,12 @@ Status Lithos_DB_Get(Lithos_DB *db, Lithos_Slice key,
   SequenceNumber snapshot_seq =
       snapshot ? snapshot->sequence : db->last_sequence;
 
-  /* Active MemTable */
   bool found = MemTable_Get(db->mem, key, snapshot_seq, value_out, &s);
   if (found) {
     pthread_mutex_unlock(&db->mu);
     return s;
   }
 
-  /* Immutable MemTable */
   if (db->imm != NULL) {
     found = MemTable_Get(db->imm, key, snapshot_seq, value_out, &s);
     if (found) {
@@ -1056,7 +1045,6 @@ Status Lithos_DB_Get(Lithos_DB *db, Lithos_Slice key,
     }
   }
 
-  /* Disk via VersionSet */
   Lithos_Version *current = NULL;
   if (db->versions) {
     current = db->versions->current;
@@ -1097,8 +1085,6 @@ Status Lithos_DB_Get(Lithos_DB *db, Lithos_Slice key,
     if (ikey_heap != NULL)
       free(ikey_heap);
 
-    /* Propagate real errors (e.g., corruption) instead of dropping them as
-     * not-found. */
     if (!Status_IsOK(s) && !Status_IsNotFound(s)) {
       return s;
     }
@@ -1259,7 +1245,6 @@ Status Lithos_Scan(Lithos_DB *db, Lithos_ScanCallback cb, void *arg) {
     }
   }
 
-  /* Emit MemTable keys first (newest data lives here). */
   if (mem) {
     Lithos_Iterator *mi = MemTable_NewIterator(mem);
     if (mi == NULL) {

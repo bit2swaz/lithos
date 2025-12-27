@@ -86,7 +86,6 @@ static int snapshot_test(Lithos_DB *db, const bool *update_mask,
     }
   }
 
-  /* Snapshot must see originals. */
   char expected[64];
   char *out = NULL;
   int errors = 0;
@@ -116,7 +115,6 @@ static int snapshot_test(Lithos_DB *db, const bool *update_mask,
     }
   }
 
-  /* Live view must reflect updates/deletes. */
   for (int i = 0; i < KEY_COUNT; i++) {
     if (update_mask[i]) {
       out = NULL;
@@ -170,7 +168,7 @@ static void persistence_test(const char *dbpath, Lithos_Options *opt,
   while (checked < SAMPLE_COUNT) {
     int idx = rand() % KEY_COUNT;
     if (delete_mask[idx])
-      continue; /* Skip deleted ones. */
+      continue;
 
     make_key(idx, key, sizeof(key));
     out = NULL;
@@ -225,7 +223,6 @@ static void tombstone_test(const char *dbpath, Lithos_Options *opt) {
   s = Lithos_Open(dbpath, opt, &db);
   assert(Status_IsOK(s));
 
-  /* Ensure deleted range is absent. */
   char *out = NULL;
   for (int i = BULK_DELETE_START; i < BULK_DELETE_END; i++) {
     make_key(i, key, sizeof(key));
@@ -235,7 +232,6 @@ static void tombstone_test(const char *dbpath, Lithos_Options *opt) {
     Status_Free(s);
   }
 
-  /* Also scan to confirm no resurrected keys in the range. */
   struct scan_ctx ctx = {0};
   s = Lithos_Scan(db, tombstone_scan_cb, &ctx);
   assert(Status_IsOK(s));

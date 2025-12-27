@@ -1,5 +1,3 @@
-/* WriteBatch implementation: encode/decode batched writes for WAL + memtable.
- */
 
 #include "lithos/write_batch.h"
 #include "util/coding.h"
@@ -7,7 +5,7 @@
 #include <string.h>
 
 static const size_t kWriteBatchHeader =
-    12; /* 8 bytes sequence + 4 bytes count */
+    12;
 
 static void EnsureCapacity(Lithos_WriteBatch *batch, size_t needed) {
   if (batch->capacity >= needed)

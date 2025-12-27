@@ -1,43 +1,8 @@
-/*
- * CRC32C: Hardware-Accelerated Checksums for Data Integrity
- * ========================================================
- * Implements Castagnoli CRC32C for detecting data corruption in SSTable
- * blocks and WAL records.
- *
- * Big Picture: Checksums = "Mathematical Proof of Data Integrity"
- * ===============================================================
- * Disk I/O can corrupt data silently. CRC32C provides mathematical assurance
- * that blocks haven't been corrupted. If the computed CRC doesn't match the
- * stored CRC, we know the data is bad and can retry or fail gracefully.
- *
- * Where it fits: Every SSTable block and WAL record has a CRC32C checksum.
- * Readers verify CRCs before using data, preventing silent corruption bugs.
- *
- * Key Concepts:
- * - Castagnoli polynomial: Better error detection than basic CRC32.
- * - Lookup table: Precomputed values for fast byte-by-byte processing.
- * - Hardware acceleration: Modern CPUs have CRC32C instructions.
- * - End-to-end verification: Checksums protect the entire I/O pipeline.
- */
 
 #include "crc32c.h"
 
-// CRC32C (Castagnoli) Polynomial: 0x1EDC6F41
-#define CRC32C_POLY 0x82f63b78 // Bit-reversed form
+#define CRC32C_POLY 0x82f63b78
 
-/**
- * CRC32C Lookup Table (256 entries)
- * Precomputed using the Castagnoli polynomial.
- *
- * Generation logic (for reference, not needed at runtime):
- *   for (uint32_t i = 0; i < 256; i++) {
- *       uint32_t crc = i;
- *       for (int j = 0; j < 8; j++) {
- *           crc = (crc >> 1) ^ ((crc & 1) ? CRC32C_POLY : 0);
- *       }
- *       table[i] = crc;
- *   }
- */
 static const uint32_t crc32c_table[256] = {
     0x00000000, 0xf26b8303, 0xe13b70f7, 0x1350f3f4, 0xc79a971f, 0x35f1141c,
     0x26a1e7e8, 0xd4ca64eb, 0x8ad958cf, 0x78b2dbcc, 0x6be22838, 0x9989ab3b,
@@ -83,14 +48,9 @@ static const uint32_t crc32c_table[256] = {
     0xd5cf889d, 0x27a40b9e, 0x79b737ba, 0x8bdcb4b9, 0x988c474d, 0x6ae7c44e,
     0xbe2da0a5, 0x4c4623a6, 0x5f16d052, 0xad7d5351};
 
-/**
- * crc32c_extend - Core CRC32C computation.
- * Processes data byte-by-byte using the lookup table.
- */
 uint32_t crc32c_extend(uint32_t crc, const char *data, size_t n) {
   const uint8_t *p = (const uint8_t *)data;
 
-  // CRC32C uses initial value of 0xFFFFFFFF and final XOR of 0xFFFFFFFF
   crc = ~crc;
 
   for (size_t i = 0; i < n; i++) {
@@ -100,9 +60,6 @@ uint32_t crc32c_extend(uint32_t crc, const char *data, size_t n) {
   return ~crc;
 }
 
-/**
- * crc32c_value - Convenience wrapper for single-shot CRC computation.
- */
 uint32_t crc32c_value(const char *data, size_t n) {
   return crc32c_extend(0, data, n);
 }

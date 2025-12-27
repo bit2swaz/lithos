@@ -1,4 +1,3 @@
-/* Public database API for Lithos. */
 
 #ifndef LITHOS_DB_H
 #define LITHOS_DB_H
@@ -18,7 +17,7 @@ typedef struct Lithos_DB Lithos_DB;
 typedef struct Lithos_Snapshot Lithos_Snapshot;
 
 typedef struct Lithos_WriteOptions {
-  bool sync; /* If true, fsync WAL on every write. */
+  bool sync;
 } Lithos_WriteOptions;
 
 Lithos_WriteOptions Lithos_WriteOptions_Default(void);
@@ -40,4 +39,4 @@ SequenceNumber Lithos_DB_LastSequence(Lithos_DB *db);
 }
 #endif
 
-#endif /* LITHOS_DB_H */
+#endif

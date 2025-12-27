@@ -1,41 +1,41 @@
-# Master Design Specification: Lithos (v1.0)
+# product spec: lithos (v1.0)
 
-| Meta Field | Value |
+| meta | value |
 | --- | --- |
-| **Project Name** | **Lithos** |
-| **Version** | **1.0.0 (Release)** |
-| **Author** | Aditya (`@bit2swaz`) |
-| **Status** | **PRODUCTION** |
-| **Language** | **C11 (ISO/IEC 9899:2011)** |
-| **Dependencies** | `libc`, `pthread` (POSIX Threads) |
-| **Zero-Dependency** | **Yes** (Internal RLE Compression, Internal CRC32C) |
-| **Endianness** | **Little Endian** (Strict) |
-| **Concurrency** | **MVCC** (Multi-Version Concurrency Control) via Snapshots |
-| **Architecture** | **LSM-Tree** (Log-Structured Merge Tree) |
+| project | lithos |
+| version | 1.0.0 (release) |
+| author | aditya (`@bit2swaz`) |
+| status | production |
+| language | c11 (iso/iec 9899:2011) |
+| dependencies | `libc`, `pthread` (posix threads) |
+| zero-dependency | yes (internal rle compression, internal crc32c) |
+| endianness | little endian (strict) |
+| concurrency | mvcc via snapshots |
+| architecture | lsm-tree |
 
 ---
 
-## 1. Executive Summary
+## 1. executive summary
 
-**Lithos** is a persistent, thread-safe, high-performance Key-Value storage engine embedded as a C library. It is architected to provide strict resource control and ACID guarantees without the runtime overhead of C++. It implements a classic Log-Structured Merge-Tree (LSM) design with Leveled Compaction, Write-Ahead Logging (WAL), and native compression.
+**lithos** is a persistent, thread-safe, high-performance key-value storage engine embedded as a c library. it is built for strict resource control and acid guarantees without the runtime overhead of c++. it implements a classic log-structured merge-tree with leveled compaction, write-ahead logging (wal), and native compression.
 
-### 1.1 Verified Capabilities (v1.0)
+### 1.1 verified capabilities (v1.0)
 
-* **High Throughput:** CLI `bench` (50k ops, 512B values) on dev hardware reports ~73k writes/sec and ~97k reads/sec.
-* **Snapshot Isolation:** Supports point-in-time reads via `Lithos_GetSnapshot`.
-* **Crash Consistency:** Automatic WAL replay on startup recovers un-flushed MemTable data.
-* **Storage Efficiency:** Native Run-Length Encoding (RLE) and Prefix Compression minimize disk footprint.
-* **Maintenance:** Background compaction automatically merges and cleans up SSTables (Leveled Strategy).
-* **Corruption Detection:** SST block CRC32C is verified on read; checksum mismatches surface as `LITHOS_CORRUPTION`.
-* **Sanitizer Cleanliness:** ASan/UBSan builds run `lithos_stress` and `lithos_fuzz` leak-free while still detecting injected SST corruption.
+- high throughput: cli `bench` (50k ops, 512b values) on dev hardware reports ~73k writes/sec and ~97k reads/sec.
+- snapshot isolation: supports point-in-time reads via `lithos_getsnapshot`.
+- crash consistency: automatic wal replay on startup recovers un-flushed memtable data.
+- storage efficiency: native run-length encoding (rle) and prefix compression minimize disk footprint.
+- maintenance: background compaction automatically merges and cleans up sstables (leveled strategy).
+- corruption detection: sst block crc32c is verified on read; checksum mismatches surface as `lithos_corruption`.
+- sanitizer cleanliness: asan/ubsan builds run `lithos_stress` and `lithos_fuzz` leak-free while still detecting injected sst corruption.
 
 ---
 
-## 2. System Architecture
+## 2. system architecture
 
-The engine functions as a **pipelined state machine**. Data flows from volatile RAM buffers to immutable disk files through a series of transformations.
+the engine functions as a pipelined state machine. data flows from volatile ram buffers to immutable disk files through a series of transformations.
 
-### 2.1 Data Flow Diagram
+### 2.1 data flow diagram
 
 ```mermaid
 graph TD
@@ -74,90 +74,89 @@ graph TD
     L0 -->|Miss| L1
 ```
 
-### 2.2 Component Hierarchy
+### 2.2 component hierarchy
 
-* **Frontend (API Layer):** `lithos.h` exposes opaque handles and thread-safe entry points.
-* **Version Controller (`VersionSet`):** Manages the "current state" of the database (live SST files per level). Handles RefCounting for MVCC.
-* **Write Path:**
-* `WriteBatch`: atomic group of updates.
-* `LogWriter`: Appends to `wal.log`.
-* `MemTable`: Inserts into in-memory SkipList.
-
-
-* **Read Path:**
-* `MemTable` (Active)  `MemTable` (Immutable)  `TableCache` (SSTs).
-* Uses a **Two-Level Iterator** (Index Block  Data Block) for disk lookups.
+* frontend (api layer): `lithos.h` exposes opaque handles and thread-safe entry points.
+* version controller (`versionset`): manages the current state of the database (live sst files per level). handles refcounting for mvcc.
+* write path:
+* `writebatch`: atomic group of updates.
+* `logwriter`: appends to `wal.log`.
+* `memtable`: inserts into in-memory skiplist.
 
 
-* **Maintenance:**
-* `Compaction`: Merges overlapping L0 files into L1 (and so on).
-* `TableBuilder`: Generates new SST files with Bloom Filters and RLE compression.
+* read path:
+* `memtable` (active)  `memtable` (immutable)  `tablecache` (ssts).
+* uses a two-level iterator (index block  data block) for disk lookups.
 
 
-
----
-
-## 3. Core Subsystems & Data Structures
-
-### 3.1 Memory Management: The Arena
-
-To prevent memory fragmentation and syscall overhead, Lithos avoids `malloc` for individual SkipList nodes.
-
-* **Mechanism:** Allocates memory in 4KB "Blocks".
-* **Allocation:** Bump-pointer allocation within the current block.
-* **Lifecycle:** The entire Arena is freed only when its owner (MemTable) is flushed and destroyed; background flushes drop both worker and DB refs to release arenas promptly.
-* **Alignment:** Enforces 8-byte alignment for all pointers.
-
-### 3.2 The MemTable (SkipList)
-
-* **Structure:** Multilevel Linked List (Skip List) with probabilistic height.
-* **Concurrency:**
-* **Writes:** Serialized via `db_mutex`.
-* **Reads:** Lock-free traversal using `atomic_load` (memory_order_acquire).
-
-
-* **Key Format:**
-* **InternalKey:** `UserKey` + `SequenceNumber` (7 bytes) + `ValueType` (1 byte).
-* **Comparator:** Sorts by UserKey (Ascending)  SequenceNumber (Descending). This ensures the newest version of a key appears first.
-
-
-
-### 3.3 The VersionSet (MVCC & Metadata)
-
-* **Manifest:** A log file (`MANIFEST-XXXXXX`) stores `VersionEdit` records.
-* **VersionEdit:** Describes a delta transition (e.g., "Delete File 4 from L0, Add File 5 to L1").
-* **Snapshot Logic:**
-* `Lithos_GetSnapshot` captures the current `LastSequence`.
-* `Compaction` prevents deletion of overwritten keys if their sequence number is visible to an active snapshot.
+* maintenance:
+* `compaction`: merges overlapping l0 files into l1 (and so on).
+* `tablebuilder`: generates new sst files with bloom filters and rle compression.
 
 
 
 ---
 
-## 4. Disk Format Specifications
+## 3. core subsystems and data structures
 
-All integers are **Little Endian**.
-**Varint64:** Variable-length integers (Protobuf style) are used for lengths to save space.
+### 3.1 memory management: the arena
 
-### 4.1 Write-Ahead Log (WAL)
+to prevent memory fragmentation and syscall overhead, lithos avoids `malloc` for individual skiplist nodes.
 
-A sequence of 32KB blocks. Records are fragmented if they cross block boundaries.
+* mechanism: allocates memory in 4kb blocks.
+* allocation: bump-pointer allocation within the current block.
+* lifecycle: the entire arena is freed only when its owner (memtable) is flushed and destroyed; background flushes drop both worker and db refs to release arenas promptly.
+* alignment: enforces 8-byte alignment for all pointers.
 
-**Record Format:**
+### 3.2 the memtable (skiplist)
+
+* structure: multilevel linked list (skip list) with probabilistic height.
+* concurrency:
+* writes: serialized via `db_mutex`.
+* reads: lock-free traversal using `atomic_load` (memory_order_acquire).
+
+
+* key format:
+* internalkey: `userkey` + `sequencenumber` (7 bytes) + `valuetype` (1 byte).
+* comparator: sorts by userkey (ascending)  sequencenumber (descending). this ensures the newest version of a key appears first.
+
+
+
+### 3.3 the versionset (mvcc and metadata)
+
+* manifest: a log file (`manifest-XXXXXX`) stores `versionedit` records.
+* versionedit: describes a delta transition (e.g., delete file 4 from l0, add file 5 to l1).
+* snapshot logic:
+* `lithos_getsnapshot` captures the current `lastsequence`.
+* `compaction` prevents deletion of overwritten keys if their sequence number is visible to an active snapshot.
+
+
+
+---
+
+## 4. disk format specifications
+
+all integers are little endian. varint64 (protobuf style) is used for lengths to save space.
+
+### 4.1 write-ahead log (wal)
+
+sequence of 32kb blocks. records are fragmented if they cross block boundaries.
+
+record format:
 
 ```text
 [Checksum (4B)] [Length (2B)] [Type (1B)] [Payload (N Bytes)]
 
 ```
 
-* `Checksum`: CRC32C of Type + Payload.
-* `Type`: `kFullType`, `kFirstType`, `kMiddleType`, `kLastType`.
+- checksum: crc32c of type + payload.
+- type: `kfulltype`, `kfirsttype`, `kmiddletype`, `klasttype`.
 
-### 4.2 SSTable (Sorted String Table) v1
+### 4.2 sstable (sorted string table) v1
 
-Immutable file format for persistent storage. Based on the LevelDB/RocksDB Block-Based format.
+immutable file format for persistent storage. based on the leveldb/rocksdb block-based format.
 
-**File Layout:**
+file layout:
 
 ```text
 [Data Block 0]
@@ -170,22 +169,22 @@ Immutable file format for persistent storage. Based on the LevelDB/RocksDB Block
 
 ```
 
-**A. Data Block Format (Prefix Compressed):**
-Keys are compressed relative to the previous key.
+**a. data block format (prefix compressed):**
+keys are compressed relative to the previous key.
 
 ```text
 [SharedLen (Varint)] [NonSharedLen (Varint)] [ValLen (Varint)] [KeySuffix] [Value]
 
 ```
 
-**B. Block Compression (RLE):**
+**b. block compression (rle):**
 
-* **Algorithm:** Run-Length Encoding.
-* **Trigger:** Controlled by `options.compression_enabled`.
-* **Storage:** The block trailer contains a `Type` byte (`0` = Raw, `1` = RLE). The reader checks this byte to decide whether to uncompress.
+* algorithm: run-length encoding.
+* trigger: controlled by `options.compression_enabled`.
+* storage: the block trailer contains a `type` byte (`0` = raw, `1` = rle). the reader checks this byte to decide whether to uncompress.
 
-**C. Footer (Fixed 48 Bytes):**
-Located at `FileSize - 48`. Allows boot-strapping the file read.
+**c. footer (fixed 48 bytes):**
+located at `filesize - 48`. allows boot-strapping the file read.
 
 ```c
 struct Footer {
@@ -199,54 +198,54 @@ struct Footer {
 
 ---
 
-## 5. Subsystem Logic
+## 5. subsystem logic
 
-### 5.1 Compaction (Leveled)
+### 5.1 compaction (leveled)
 
-The heart of the LSM tree. Keeps read speeds fast by removing deleted data and merging files.
+core of the lsm tree. keeps read speeds fast by removing deleted data and merging files.
 
-**Levels:**
+levels:
 
-* **L0:** Created by MemTable Flush. Keys **can** overlap between files.
-* **L1 - L6:** Keys **cannot** overlap. Sorted disjoint ranges.
+- l0: created by memtable flush. keys can overlap between files.
+- l1 - l6: keys cannot overlap. sorted disjoint ranges.
 
-**The Algorithm (`DoCompactionWork`):**
+the algorithm (`docompactionwork`):
 
-1. **Trigger:**
-* L0 score: `NumFiles / 4` > 1.0
-* L1+ score: `TotalBytes / Limit` > 1.0
-
-
-2. **Pick:** Select file(s) from Level `N` and overlapping files from Level `N+1`.
-3. **Merge:**
-* Open `MergingIterator` (K-Way Merge Sort).
-* Iterate through keys.
-* **Drop Rule:** Discard key IF (`Type == kTypeDeletion` AND Key not in higher levels) OR (`Sequence < SmallestSnapshot` AND overwritten).
+1. trigger:
+- l0 score: `numfiles / 4` > 1.0
+- l1+ score: `totalbytes / limit` > 1.0
 
 
-4. **Output:** Write to new SSTable(s).
-5. **Commit:** Atomic `LogAndApply` to `VersionSet`.
-
-### 5.2 Table Cache & Block Cache
-
-* **Table Cache:** An LRU cache of open file descriptors (`Lithos_Table*`). Limits the OS file handle usage (default: 1000).
-* **Block Cache:** An LRU cache of uncompressed data blocks (`4KB`).
-* **Sharding:** Split into 16 shards based on `Hash(Key)` to reduce mutex contention.
-* **Lookup Key:** `CacheID (8B) + Offset (8B)`.
+2. pick: select file(s) from level `n` and overlapping files from level `n+1`.
+3. merge:
+- open `mergingiterator` (k-way merge sort).
+- iterate through keys.
+- drop rule: discard key if (`type == ktypedeletion` and key not in higher levels) or (`sequence < smallestsnapshot` and overwritten).
 
 
+4. output: write to new sstable(s).
+5. commit: atomic `logandapply` to `versionset`.
 
-### 5.3 Bloom Filters
+### 5.2 table cache and block cache
 
-* **Policy:** Double-Hashing.
-* **Storage:** Stored in a separate block at the end of the SST file.
-* **Usage:** Before reading a Data Block, the reader checks the Bloom Filter. If the filter returns `false`, disk I/O is skipped completely.
+* table cache: an lru cache of open file descriptors (`lithos_table*`). limits os file handle usage (default: 1000).
+* block cache: an lru cache of uncompressed data blocks (`4kb`).
+* sharding: split into 16 shards based on `hash(key)` to reduce mutex contention.
+* lookup key: `cacheid (8b) + offset (8b)`.
+
+
+
+### 5.3 bloom filters
+
+* policy: double-hashing.
+* storage: stored in a separate block at the end of the sst file.
+* usage: before reading a data block, the reader checks the bloom filter. if the filter returns `false`, disk i/o is skipped completely.
 
 ---
 
-## 6. Public API Specification (`lithos.h`)
+## 6. public api specification (`lithos.h`)
 
-Current public header shape:
+current public header shape:
 
 ```c
 #ifndef LITHOS_H
@@ -286,7 +285,7 @@ void Lithos_Free(void* ptr);
 
 ```
 
-`Lithos_Options` (from `include/lithos/options.h`):
+`lithos_options` (from `include/lithos/options.h`):
 
 ```c
 typedef struct Lithos_Options {
@@ -299,19 +298,19 @@ typedef struct Lithos_Options {
 } Lithos_Options;
 ```
 
-Initialize with `Lithos_Options_InitDefault(&opt);` before opening a DB.
+initialize with `lithos_options_initdefault(&opt);` before opening a db.
 
 ---
 
-## 7. Tooling & CLI
+## 7. tooling and cli
 
-Lithos includes a robust CLI tool for administration and benchmarking.
+lithos includes a robust cli tool for administration and benchmarking.
 
 ### 7.1 `lithos_cli`
 
-Usage: `./lithos_cli <db_path> <command> [args]`
+usage: `./lithos_cli <db_path> <command> [args]`
 
-| Command | Args | Description |
+| command | args | description |
 | --- | --- | --- |
 | `put` | `<key> <val>` | Insert a key-value pair. |
 | `get` | `<key>` | Retrieve and print a value. |
@@ -322,7 +321,7 @@ Usage: `./lithos_cli <db_path> <command> [args]`
 
 ### 7.2 `lithos_stress`
 
-Standalone C binary that performs a "Gauntlet" test suite:
+standalone c binary that performs a gauntlet test suite:
 
 1. **Saturation:** Writes ~20k keys to trigger compaction.
 2. **Isolation:** Snapshot sees pre-overwrite values; live view sees updates/deletes.
@@ -331,7 +330,7 @@ Standalone C binary that performs a "Gauntlet" test suite:
 
 ### 7.3 `lithos_fuzz`
 
-Corruption-injection harness that flips a random bit inside a freshly written SST:
+corruption-injection harness that flips a random bit inside a freshly written sst:
 
 1. Write key `integrity_test`, close DB to flush to SST.
 2. Open the newest `.sst`, flip a random bit in the file.
@@ -340,39 +339,39 @@ Corruption-injection harness that flips a random bit inside a freshly written SS
 
 ---
 
-## 8. Build System
+## 8. build system
 
-* **Build Tool:** GNU Make
-* **Targets:**
-* `make all`: Builds library, tests, CLI, stress, fuzz.
-* `make test`: Runs unit tests (`lithos_test_main`).
-* `make stress`: Builds the stress tool.
-* `make fuzz`: Builds the corruption harness.
-* `make sanitize`: Rebuilds with `-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer`.
-* `make help`: Prints target help.
-* `make clean`: Removes artifacts.
+* build tool: gnu make
+* targets:
+* `make all`: builds library, tests, cli, stress, fuzz.
+* `make test`: runs unit tests (`lithos_test_main`).
+* `make stress`: builds the stress tool.
+* `make fuzz`: builds the corruption harness.
+* `make sanitize`: rebuilds with `-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer`.
+* `make help`: prints target help.
+* `make clean`: removes artifacts.
 
 
-* **Output:**
-* Library: `build/liblithos.a`
-* Binaries: `build/bin/lithos_cli`, `build/bin/lithos_stress`, `build/bin/lithos_fuzz`
+* output:
+* library: `build/liblithos.a`
+* binaries: `build/bin/lithos_cli`, `build/bin/lithos_stress`, `build/bin/lithos_fuzz`
 
 
 
 ---
 
-## 9. Verification Strategy (Passed)
+## 9. verification strategy (passed)
 
-The following tests must pass before any release:
+the following tests must pass before any release:
 
-1. **Unit Tests:** 23,800+ assertions in `lithos_test_main` (covering WAL, SkipList, Bloom, Cache).
-2. **Leak Check:** `valgrind --leak-check=full` must report **0 bytes lost**.
-3. **Gauntlet:** `lithos_stress` must pass all 4 stages (Saturation, Isolation, Persistence, Tombstones).
-4. **Benchmark:** `lithos_cli bench` must demonstrate >30k ops/sec.
+1. unit tests: 23,800+ assertions in `lithos_test_main` (covering wal, skiplist, bloom, cache).
+2. leak check: `valgrind --leak-check=full` must report 0 bytes lost.
+3. gauntlet: `lithos_stress` must pass all 4 stages (saturation, isolation, persistence, tombstones).
+4. benchmark: `lithos_cli bench` must demonstrate >30k ops/sec.
 
-### 9.1 Sanitizer QA (ASan/UBSan)
+### 9.1 sanitizer qa (asan/ubsan)
 
-Run on fresh builds to guarantee leak/UB freedom while still surfacing corruption:
+run on fresh builds to guarantee leak/ub freedom while still surfacing corruption:
 
 ```
 make sanitize -j$(nproc)
@@ -384,4 +383,4 @@ rm -rf /tmp/lithos-fuzz-db && ./build/bin/lithos_fuzz /tmp/lithos-fuzz-db
 # Expect: corruption message (flipped SST) and clean ASan/UBSan exit with zero leaks.
 ```
 
-Notes: Imm memtable flush now drops both worker and DB refs; FileMetaData created during flush is released on both success and failure, keeping leak detectors clean.
+notes: imm memtable flush now drops both worker and db refs; filemetadata created during flush is released on both success and failure, keeping leak detectors clean.

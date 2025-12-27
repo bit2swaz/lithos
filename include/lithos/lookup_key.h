@@ -1,4 +1,3 @@
-/* Minimal lookup key holder for internal/user key pair. */
 
 #ifndef LITHOS_LOOKUP_KEY_H
 #define LITHOS_LOOKUP_KEY_H
@@ -27,4 +26,4 @@ static inline LookupKey LookupKey_Create(Lithos_Slice user_key,
 }
 #endif
 
-#endif /* LITHOS_LOOKUP_KEY_H */
+#endif

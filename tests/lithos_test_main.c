@@ -1,8 +1,3 @@
-/**
- * Lithos Test Suite Main
- *
- * Entry point for running all Lithos tests.
- */
 
 #include "all_tests.h"
 #include "testharness.h"

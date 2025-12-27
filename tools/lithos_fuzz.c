@@ -56,7 +56,6 @@ static bool find_latest_sst(const char *dbpath, char *out, size_t out_sz) {
   return found;
 }
 
-/* Flip a bit at the given offset in the SST file. */
 static bool flip_bit_at(const char *path, long offset) {
   FILE *f = fopen(path, "rb+");
   if (!f)
@@ -97,7 +96,6 @@ static bool flip_bit_at(const char *path, long offset) {
   return true;
 }
 
-/* Target the index block so Table_Open() will verify CRC and fail fast. */
 static bool flip_index_block_bit(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f)
@@ -136,8 +134,8 @@ static bool flip_index_block_bit(const char *path) {
   }
 
   uint64_t trailer_start =
-      footer.index_handle.offset + footer.index_handle.size; /* type byte */
-  uint64_t target = trailer_start + 1; /* first CRC byte */
+      footer.index_handle.offset + footer.index_handle.size;
+  uint64_t target = trailer_start + 1;
 
   if (target >= (uint64_t)sz) {
     fprintf(stderr, "Target beyond file: target=%llu size=%ld\n",
@@ -160,7 +158,6 @@ static bool flip_random_bit(const char *path) {
     return true;
   }
 
-  /* Fallback: flip near footer region if decoding fails. */
   FILE *f = fopen(path, "rb");
   if (!f)
     return false;
@@ -180,7 +177,6 @@ static bool flip_random_bit(const char *path) {
   return flip_bit_at(path, offset);
 }
 
-/* Try opening the SST directly; if CRC fails, Table_Open should surface it. */
 static bool detect_corruption_via_table(const char *sst_path,
                                         const Lithos_Options *opt) {
   struct stat st;
@@ -252,7 +248,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  /* Force an SST flush by bulk loading filler keys. */
   const int filler_count = 8000;
   const int filler_size = 512;
   char *filler = malloc((size_t)filler_size + 1);
@@ -302,7 +297,7 @@ int main(int argc, char **argv) {
   if (!Status_IsOK(s)) {
     fprintf(stderr, "reopen: %s\n", Status_ToString(s));
     Status_Free(s);
-    return 0; /* Expected failure modes are OK for this fuzz. */
+    return 0;
   }
 
   char *val = NULL;

@@ -1,4 +1,3 @@
-/* Skeletal TableCache interface. */
 
 #ifndef LITHOS_CORE_TABLE_CACHE_H
 #define LITHOS_CORE_TABLE_CACHE_H
@@ -23,7 +22,6 @@ Status TableCache_Get(TableCache *cache, FileMetaData *f,
                       Lithos_Slice internal_key, Lithos_Slice *value_out,
                       bool *found, bool *deleted);
 
-/* Create an iterator over a cached table. Caller owns returned iterator. */
 Lithos_Iterator *TableCache_NewIterator(TableCache *cache, FileMetaData *f,
                                         const Lithos_Options *options);
 
@@ -31,4 +29,4 @@ Lithos_Iterator *TableCache_NewIterator(TableCache *cache, FileMetaData *f,
 }
 #endif
 
-#endif /* LITHOS_CORE_TABLE_CACHE_H */
+#endif

@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 200809L // Enable strdup
+#define _POSIX_C_SOURCE 200809L
 
 #include "core/skiplist.h"
 #include "testharness.h"
@@ -15,19 +15,14 @@ static int StringComparator(const void *a, const void *b) {
 static void Test_SkipList(void) {
   printf(COLOR_BLUE "[Test] SkipList Basic Operations\n" COLOR_RESET);
 
-  // Create an Arena for node allocations
   Lithos_Arena *arena = Arena_Create();
   ASSERT_TRUE(arena != NULL);
 
-  // Create a SkipList with string comparator
   Lithos_SkipList *list = SkipList_Create(StringComparator, arena);
   ASSERT_TRUE(list != NULL);
 
-  // Test 1: Insert keys in non-sorted order
   printf("  Inserting: '1', '5', '3', '9', '7'\n");
 
-  // Allocate keys on the heap (they need to outlive the test)
-  // In production, these would be Arena-allocated as part of the InternalKey.
   char *key1 = strdup("1");
   char *key3 = strdup("3");
   char *key5 = strdup("5");
@@ -40,7 +35,6 @@ static void Test_SkipList(void) {
   SkipList_Insert(list, key9);
   SkipList_Insert(list, key7);
 
-  // Test 2: Contains() should find existing keys
   printf("  Checking Contains('5'): ");
   if (SkipList_Contains(list, "5")) {
     printf(COLOR_GREEN "FOUND\n" COLOR_RESET);
@@ -57,7 +51,6 @@ static void Test_SkipList(void) {
     ASSERT_TRUE(false);
   }
 
-  // Test 3: Contains() should NOT find missing keys
   printf("  Checking Contains('2'): ");
   if (!SkipList_Contains(list, "2")) {
     printf(COLOR_GREEN "NOT FOUND (correct)\n" COLOR_RESET);
@@ -74,7 +67,6 @@ static void Test_SkipList(void) {
     ASSERT_TRUE(false);
   }
 
-  // Test 4: Iterator should return keys in sorted order
   printf("  Iterating from first:\n");
   Lithos_Iterator *iter = SkipList_NewIterator(list);
   ASSERT_TRUE(iter != NULL);
@@ -89,7 +81,6 @@ static void Test_SkipList(void) {
     const char *key = (const char *)Iter_Key(iter);
     printf("%s ", key);
 
-    // Verify order
     if (strcmp(key, expected[i]) != 0) {
       printf(COLOR_RED "\n    ERROR: Expected '%s', got '%s'\n" COLOR_RESET,
              expected[i], key);
@@ -108,7 +99,6 @@ static void Test_SkipList(void) {
     ASSERT_TRUE(false);
   }
 
-  // Test 5: Seek to specific key
   printf("  Seeking to '5':\n");
   Iter_Seek(iter, "5");
   if (Iter_Valid(iter)) {
@@ -125,7 +115,6 @@ static void Test_SkipList(void) {
     ASSERT_TRUE(false);
   }
 
-  // Test 6: Seek to non-existent key (should find next higher)
   printf("  Seeking to '4' (not present, should find '5'):\n");
   Iter_Seek(iter, "4");
   if (Iter_Valid(iter)) {
@@ -142,12 +131,10 @@ static void Test_SkipList(void) {
     ASSERT_TRUE(false);
   }
 
-  // Cleanup
   Iter_Destroy(iter);
   SkipList_Destroy(list);
   Arena_Destroy(arena);
 
-  // Free heap-allocated keys
   free(key1);
   free(key3);
   free(key5);

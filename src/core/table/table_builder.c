@@ -1,27 +1,3 @@
-/*
- * SSTable Builder: Multi-Block File Assembly with Compression & Filters
- * ===================================================================
- * Orchestrates the construction of complete SSTable files from sorted KV
- * streams. Manages data blocks, filters, index, and footer in the correct
- * sequence.
- *
- * Big Picture: Table Builder = "SSTable Assembly Line"
- * ===================================================
- * Takes a sorted stream of key-value pairs and builds a complete SSTable file
- * with all its components: compressed data blocks, Bloom filters, index block,
- * metaindex, and navigation footer. This is the "write path" counterpart to
- * the Table reader.
- *
- * Where it fits: Table builders are used during compaction and memtable flushes
- * to create new SSTable files. They ensure proper block boundaries,
- * compression, and metadata for efficient future reads.
- *
- * Key Concepts:
- * - Block flushing: When data blocks fill up, flush them and add to index.
- * - Filter building: Accumulate keys for Bloom filters every 2KB of data.
- * - Index construction: Map key ranges to data block locations.
- * - Footer writing: Fixed 48-byte trailer with index/metaindex pointers.
- */
 
 #include "core/table/table_builder.h"
 #include "core/table/block_builder.h"
@@ -34,64 +10,41 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * Block trailer format (appended after block data):
- * - Type (1 byte): Compression type (0 = none, 1 = RLE)
- * - CRC32C (4 bytes): Checksum of (Type + Data)
- */
 #define BLOCK_TRAILER_SIZE 5
 
 struct Lithos_TableBuilder {
-  Lithos_Options options;           // Configuration
-  Lithos_WritableFile *file;        // Output file
-  uint64_t offset;                  // Current write position in file
-  lithos_status_code status;        // First error encountered
-  Lithos_BlockBuilder *data_block;  // Current data block being built
-  Lithos_BlockBuilder *index_block; // Index block (maps keys -> block offsets)
-  FilterBlockBuilder *filter_block; // Filter block (Bloom filters)
-  char *last_key;                   // Last key added (for index generation)
+  Lithos_Options options;
+  Lithos_WritableFile *file;
+  uint64_t offset;
+  lithos_status_code status;
+  Lithos_BlockBuilder *data_block;
+  Lithos_BlockBuilder *index_block;
+  FilterBlockBuilder *filter_block;
+  char *last_key;
   size_t last_key_size;
   size_t last_key_capacity;
-  uint64_t num_entries; // Total key-value pairs added
-  bool closed;          // True after Finish() or Abandon()
+  uint64_t num_entries;
+  bool closed;
 
-  /* Pending index entry state */
-  bool pending_index_entry;          // True if we need to add index entry
-  Lithos_BlockHandle pending_handle; // Handle of the data block just flushed
+  bool pending_index_entry;
+  Lithos_BlockHandle pending_handle;
 };
 
-/*
- * Helper: Write a block to file with compression and checksum.
- *
- * Format written to file:
- *   [Block Data] [Type:1] [CRC32:4]
- *
- * Parameters:
- *   tb     - Table builder
- *   block  - Finished block builder
- *   handle - Output: receives offset and size of the block data (excludes
- * trailer)
- *
- * Returns: LITHOS_OK on success
- */
 static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
                                      Lithos_BlockBuilder *block,
                                      Lithos_BlockHandle *handle) {
   assert(!tb->closed);
 
-  /* Get the finished block content */
   Lithos_Slice block_contents = BlockBuilder_Finish(block);
   const char *raw_data = block_contents.data;
   size_t raw_size = block_contents.size;
   uint8_t type = LITHOS_COMPRESSION_NONE;
 
-  /* Optional RLE compression */
   const char *data_to_write = raw_data;
   size_t data_size = raw_size;
   char *compressed_buf = NULL;
   if (tb->options.compression_enabled && raw_size > 0) {
-    /* Worst-case RLE expansion is 3x for marker-heavy data. Add 4 bytes for raw
-     * size. */
+
     size_t cap = raw_size * 3 + 4;
     compressed_buf = (char *)malloc(cap);
     if (compressed_buf != NULL) {
@@ -101,7 +54,7 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
       if (ok) {
         EncodeFixed32(compressed_buf, (uint32_t)raw_size);
         data_to_write = compressed_buf;
-        data_size = comp_len + 4; /* include uncompressed length header */
+        data_size = comp_len + 4;
         type = LITHOS_COMPRESSION_RLE;
       } else {
         free(compressed_buf);
@@ -110,11 +63,9 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
     }
   }
 
-  /* Set handle to point to the block data (NOT including trailer) */
   handle->offset = tb->offset;
   handle->size = data_size;
 
-  /* Write block data */
   Lithos_Slice payload = {data_to_write, data_size};
   Status s = WritableFile_Append(tb->file, payload);
   if (s.code != LITHOS_OK) {
@@ -123,16 +74,13 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
     return s.code;
   }
 
-  /* Prepare trailer: [Type:1] [CRC32:4] */
   char trailer[BLOCK_TRAILER_SIZE];
   trailer[0] = (char)type;
 
-  /* Calculate CRC32C of (Type + Data) */
-  uint32_t crc = crc32c_extend(0, trailer, 1);        // Type byte
-  crc = crc32c_extend(crc, data_to_write, data_size); // Data
+  uint32_t crc = crc32c_extend(0, trailer, 1);
+  crc = crc32c_extend(crc, data_to_write, data_size);
   EncodeFixed32(trailer + 1, crc);
 
-  /* Write trailer */
   Lithos_Slice trailer_slice = {trailer, BLOCK_TRAILER_SIZE};
   s = WritableFile_Append(tb->file, trailer_slice);
   if (s.code != LITHOS_OK) {
@@ -141,7 +89,6 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
     return s.code;
   }
 
-  /* Update file offset */
   tb->offset += data_size + BLOCK_TRAILER_SIZE;
 
   if (compressed_buf) {
@@ -151,17 +98,6 @@ static lithos_status_code WriteBlock(Lithos_TableBuilder *tb,
   return LITHOS_OK;
 }
 
-/*
- * Helper: Flush the current data block to file.
- *
- * This does NOT immediately write an index entry. Instead, it sets
- * pending_index_entry = true. The index entry is written when we know
- * the first key of the NEXT data block (or at Finish time).
- *
- * Why wait? We want the index key to be a separator between blocks.
- * The optimal separator is one that is >= last key of block N and
- * < first key of block N+1.
- */
 static lithos_status_code FlushDataBlock(Lithos_TableBuilder *tb) {
   assert(!tb->closed);
   assert(!BlockBuilder_Empty(tb->data_block));
@@ -170,40 +106,29 @@ static lithos_status_code FlushDataBlock(Lithos_TableBuilder *tb) {
     return tb->status;
   }
 
-  /* Notify filter builder about the starting file offset of this block. */
   if (tb->filter_block != NULL) {
     FilterBlockBuilder_StartBlock(tb->filter_block, tb->offset);
   }
 
-  /* Write the data block to the file and record its handle. */
   lithos_status_code s = WriteBlock(tb, tb->data_block, &tb->pending_handle);
   if (s != LITHOS_OK) {
     tb->status = s;
     return s;
   }
 
-  /* Defer writing the index entry until we know the next block's first key. */
   tb->pending_index_entry = true;
 
-  /* Flush to OS buffers; fsync policy is controlled by WritableFile impl. */
   Status sync_status = WritableFile_Flush(tb->file);
   if (sync_status.code != LITHOS_OK) {
     tb->status = sync_status.code;
     return sync_status.code;
   }
 
-  /* Reset data block for next batch of keys */
   BlockBuilder_Reset(tb->data_block);
 
   return LITHOS_OK;
 }
 
-/*
- * Helper: Add the pending index entry to the index block.
- *
- * The index entry maps: last_key -> BlockHandle of the data block
- * The BlockHandle is encoded as Varint64(offset) + Varint64(size).
- */
 static void AddIndexEntry(Lithos_TableBuilder *tb) {
   if (!tb->pending_index_entry) {
     return;
@@ -212,8 +137,7 @@ static void AddIndexEntry(Lithos_TableBuilder *tb) {
   assert(tb->last_key != NULL);
   assert(tb->last_key_size > 0);
 
-  /* Encode the BlockHandle (offset + size as varints). */
-  char handle_encoding[20]; // Max 20 bytes for 2 Varint64s
+  char handle_encoding[20];
   size_t handle_len = BlockHandle_Encode(&tb->pending_handle, handle_encoding);
 
   Lithos_Slice key = {tb->last_key, tb->last_key_size};
@@ -287,18 +211,15 @@ lithos_status_code TableBuilder_Add(Lithos_TableBuilder *tb, Lithos_Slice key,
   }
 
   if (tb->num_entries > 0) {
-    /* Verify keys are added in sorted order */
+
     Lithos_Slice last = {tb->last_key, tb->last_key_size};
     assert(Slice_Compare(last, key) < 0);
   }
 
-  /* If we have a pending index entry from the previous data block,
-   * add it now that we know the first key of the next block. */
   if (tb->pending_index_entry) {
     AddIndexEntry(tb);
   }
 
-  /* Save the key for potential index entry */
   if (key.size > tb->last_key_capacity) {
     tb->last_key_capacity = key.size * 2;
     tb->last_key = realloc(tb->last_key, tb->last_key_capacity);
@@ -310,16 +231,13 @@ lithos_status_code TableBuilder_Add(Lithos_TableBuilder *tb, Lithos_Slice key,
   memcpy(tb->last_key, key.data, key.size);
   tb->last_key_size = key.size;
 
-  /* Append to current data block builder. */
   tb->num_entries++;
   BlockBuilder_Add(tb->data_block, key, value);
 
-  /* Add key to filter block before we potentially flush the block. */
   if (tb->filter_block != NULL) {
     FilterBlockBuilder_AddKey(tb->filter_block, key);
   }
 
-  /* If block hits target size, flush and begin a new one. */
   size_t estimated_size = BlockBuilder_CurrentSizeEstimate(tb->data_block);
   if (estimated_size >= tb->options.block_size) {
     lithos_status_code s = FlushDataBlock(tb);
@@ -342,7 +260,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     return tb->status;
   }
 
-  /* Flush any buffered KV pairs into a final data block. */
   if (!BlockBuilder_Empty(tb->data_block)) {
     lithos_status_code s = FlushDataBlock(tb);
     if (s != LITHOS_OK) {
@@ -352,19 +269,16 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     }
   }
 
-  /* Add the final index entry now that no more data blocks follow. */
   if (tb->pending_index_entry) {
     AddIndexEntry(tb);
   }
 
-  /* Emit filter block (Bloom filters) if configured. */
   Lithos_BlockHandle filter_handle;
   BlockHandle_Init(&filter_handle);
 
   if (tb->filter_block != NULL) {
     Lithos_Slice filter_contents = FilterBlockBuilder_Finish(tb->filter_block);
 
-    /* Write filter block to file */
     Status filter_status = WritableFile_Append(tb->file, filter_contents);
     if (filter_status.code != LITHOS_OK) {
       tb->status = filter_status.code;
@@ -372,9 +286,8 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
       return filter_status.code;
     }
 
-    /* Calculate CRC and write trailer */
     char trailer[BLOCK_TRAILER_SIZE];
-    trailer[0] = 0; // No compression
+    trailer[0] = 0;
     uint32_t crc = crc32c_extend(0, trailer, 1);
     crc = crc32c_extend(crc, filter_contents.data, filter_contents.size);
     EncodeFixed32(trailer + 1, crc);
@@ -392,7 +305,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     tb->offset += filter_contents.size + BLOCK_TRAILER_SIZE;
   }
 
-  /* Metaindex block anchors optional metadata (currently only filters). */
   Lithos_BlockHandle metaindex_handle;
   Lithos_BlockBuilder *metaindex_block = BlockBuilder_Create(&tb->options);
   if (!metaindex_block) {
@@ -401,7 +313,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     return tb->status;
   }
 
-  /* Add filter block handle so readers can find it by name. */
   if (tb->filter_block != NULL) {
     const char *filter_name = "filter.lithos.builtin";
     Lithos_Slice filter_key = {filter_name, strlen(filter_name)};
@@ -423,7 +334,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     return s;
   }
 
-  /* Index block maps last keys → BlockHandle for every data block. */
   Lithos_BlockHandle index_handle;
   s = WriteBlock(tb, tb->index_block, &index_handle);
   if (s != LITHOS_OK) {
@@ -432,7 +342,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
     return s;
   }
 
-  /* Footer points to metaindex + index; fixed-size for easy seek-from-end. */
   Lithos_Footer footer;
   Footer_Init(&footer);
   footer.metaindex_handle = metaindex_handle;
@@ -451,7 +360,6 @@ lithos_status_code TableBuilder_Finish(Lithos_TableBuilder *tb) {
 
   tb->offset += LITHOS_FOOTER_ENCODED_LENGTH;
 
-  /* Sync to disk */
   Status sync_status = WritableFile_Sync(tb->file);
   if (sync_status.code != LITHOS_OK) {
     tb->status = sync_status.code;

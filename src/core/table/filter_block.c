@@ -1,24 +1,3 @@
-/*
- * Filter Blocks: Bloom Filters for Fast Negative Lookups
- * ======================================================
- * Each SSTable has a filter block containing Bloom filters - one per 2KB of
- * data blocks. This enables fast "key not present" checks to skip I/O.
- *
- * Big Picture: Filter Blocks = "Bloom Filter Arrays for SSTable Skipping"
- * =======================================================================
- * SSTables are large files. To avoid reading data blocks that don't contain
- * a key, we maintain probabilistic filters. Each filter covers ~2KB of data
- * and can definitively say "key is NOT in this range" (with false positives).
- * This reduces disk seeks by 90%+ for missing keys.
- *
- * Where it fits: Filter blocks are stored in SSTable metaindex, loaded on
- * table open. Readers check filters before loading data blocks from disk.
- *
- * Key Concepts:
- * - Bloom filters: Probabilistic set membership with no false negatives.
- * - Block-based: One filter per 2KB data chunk for granularity.
- * - Offset array: Fixed32 offsets to locate each filter in the block.
- */
 
 #include "filter_block.h"
 #include "util/coding.h"
@@ -26,38 +5,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * Filter generation parameters
- */
-#define FILTER_BASE_LG 11                 /* log2(2048) = 11 */
-#define FILTER_BASE (1 << FILTER_BASE_LG) /* 2KB */
+#define FILTER_BASE_LG 11
+#define FILTER_BASE (1 << FILTER_BASE_LG)
 
-/*
- * FilterBlockBuilder state - accumulates keys and builds filters.
- */
 struct FilterBlockBuilder {
   const Lithos_FilterPolicy
-      *policy; // Bloom filter policy (hash functions, bits)
+      *policy;
 
-  /* Accumulated keys for current filter */
-  Lithos_Slice *keys;   // Array of key slices (point into key_storage)
-  size_t num_keys;      // Keys in current filter batch
-  size_t keys_capacity; // Allocated size of keys array
+  Lithos_Slice *keys;
+  size_t num_keys;
+  size_t keys_capacity;
 
-  /* Start offsets of each filter in result_ */
-  uint32_t *filter_offsets;       // Byte offsets where each filter starts
-  size_t num_filters;             // Number of filters built so far
-  size_t filter_offsets_capacity; // Allocated size of offsets array
+  uint32_t *filter_offsets;
+  size_t num_filters;
+  size_t filter_offsets_capacity;
 
-  /* Filter data */
-  char *result;           // Concatenated filter data
-  size_t result_len;      // Current length of result
-  size_t result_capacity; // Allocated capacity of result
+  char *result;
+  size_t result_len;
+  size_t result_capacity;
 
-  /* Temp storage for keys (data is copied) */
-  char *key_storage;           // Backing store for key data
-  size_t key_storage_len;      // Used bytes in key_storage
-  size_t key_storage_capacity; // Allocated capacity of key_storage
+  char *key_storage;
+  size_t key_storage_len;
+  size_t key_storage_capacity;
 };
 
 FilterBlockBuilder *
@@ -97,10 +66,9 @@ void FilterBlockBuilder_Destroy(FilterBlockBuilder *builder) {
   }
 }
 
-/* Build a filter for the keys collected since the last boundary. */
 static void GenerateFilter(FilterBlockBuilder *builder) {
   if (builder->num_keys == 0) {
-    /* No keys, generate empty filter */
+
     if (builder->num_filters >= builder->filter_offsets_capacity) {
       builder->filter_offsets_capacity *= 2;
       builder->filter_offsets =
@@ -112,7 +80,6 @@ static void GenerateFilter(FilterBlockBuilder *builder) {
     return;
   }
 
-  /* Record filter offset */
   if (builder->num_filters >= builder->filter_offsets_capacity) {
     builder->filter_offsets_capacity *= 2;
     builder->filter_offsets =
@@ -122,36 +89,32 @@ static void GenerateFilter(FilterBlockBuilder *builder) {
   builder->filter_offsets[builder->num_filters++] =
       (uint32_t)builder->result_len;
 
-  /* Create filter */
   FilterPolicy_CreateFilter(builder->policy, builder->keys,
                             (int)builder->num_keys, &builder->result,
                             &builder->result_len, &builder->result_capacity);
 
-  /* Reset keys */
   builder->num_keys = 0;
   builder->key_storage_len = 0;
 }
 
 void FilterBlockBuilder_StartBlock(FilterBlockBuilder *builder,
                                    uint64_t block_offset) {
-  /* Advance filter index when the data block crosses the next 2KB bucket. */
+
   uint64_t filter_index = block_offset / FILTER_BASE;
 
-  /* Generate filters for all filter indices up to this one */
   while (filter_index > builder->num_filters) {
     GenerateFilter(builder);
   }
 }
 
 void FilterBlockBuilder_AddKey(FilterBlockBuilder *builder, Lithos_Slice key) {
-  /* Ensure keys array has space */
+
   if (builder->num_keys >= builder->keys_capacity) {
     builder->keys_capacity *= 2;
     builder->keys =
         realloc(builder->keys, builder->keys_capacity * sizeof(Lithos_Slice));
   }
 
-  /* Copy key bytes into contiguous storage to keep slices stable. */
   size_t needed = builder->key_storage_len + key.size;
   if (needed > builder->key_storage_capacity) {
     builder->key_storage_capacity = needed * 2;
@@ -168,15 +131,14 @@ void FilterBlockBuilder_AddKey(FilterBlockBuilder *builder, Lithos_Slice key) {
 }
 
 Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder *builder) {
-  /* Flush any remaining keys into a final filter. */
+
   if (builder->num_keys > 0) {
     GenerateFilter(builder);
   }
 
-  /* Append offsets array: one uint32 per filter. */
   size_t array_offset = builder->result_len;
   for (size_t i = 0; i < builder->num_filters; i++) {
-    /* Ensure space */
+
     if (builder->result_len + 4 > builder->result_capacity) {
       builder->result_capacity = (builder->result_len + 4) * 2;
       builder->result = realloc(builder->result, builder->result_capacity);
@@ -187,7 +149,6 @@ Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder *builder) {
     builder->result_len += 4;
   }
 
-  /* Append starting offset of the offsets array. */
   if (builder->result_len + 5 > builder->result_capacity) {
     builder->result_capacity = (builder->result_len + 5) * 2;
     builder->result = realloc(builder->result, builder->result_capacity);
@@ -196,28 +157,26 @@ Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder *builder) {
   EncodeFixed32(builder->result + builder->result_len, (uint32_t)array_offset);
   builder->result_len += 4;
 
-  /* Append base_lg (log2 of FILTER_BASE). */
   builder->result[builder->result_len++] = FILTER_BASE_LG;
 
   Lithos_Slice result = {builder->result, builder->result_len};
   return result;
 }
 
-/* Reader: interprets the offset table and delegates matching to policy. */
 struct FilterBlockReader {
   const Lithos_FilterPolicy *policy;
-  const char *data; /* Filter block contents */
+  const char *data;
   size_t size;
-  size_t offset_base; /* Offset of filter offset array */
+  size_t offset_base;
   size_t num_filters;
-  uint32_t base_lg; /* log2(FILTER_BASE) */
+  uint32_t base_lg;
 };
 
 FilterBlockReader *FilterBlockReader_Create(const Lithos_FilterPolicy *policy,
                                             Lithos_Slice contents) {
   size_t n = contents.size;
   if (n < 5) {
-    return NULL; /* Too short */
+    return NULL;
   }
 
   FilterBlockReader *reader = malloc(sizeof(FilterBlockReader));
@@ -233,7 +192,7 @@ FilterBlockReader *FilterBlockReader_Create(const Lithos_FilterPolicy *policy,
 
   if (reader->offset_base > n - 5) {
     free(reader);
-    return NULL; /* Malformed */
+    return NULL;
   }
 
   reader->num_filters = (n - 5 - reader->offset_base) / 4;
@@ -245,10 +204,10 @@ void FilterBlockReader_Destroy(FilterBlockReader *reader) { free(reader); }
 
 bool FilterBlockReader_KeyMayMatch(FilterBlockReader *reader,
                                    uint64_t block_offset, Lithos_Slice key) {
-  /* Map block_offset → filter index → slice, then ask the policy. */
+
   uint64_t index = block_offset >> reader->base_lg;
   if (index < reader->num_filters) {
-    /* Get filter offset */
+
     uint32_t start =
         DecodeFixed32(reader->data + reader->offset_base + index * 4);
     uint32_t limit;
@@ -263,10 +222,10 @@ bool FilterBlockReader_KeyMayMatch(FilterBlockReader *reader,
       Lithos_Slice filter = {reader->data + start, limit - start};
       return FilterPolicy_KeyMayMatch(reader->policy, key, filter);
     } else if (start == limit) {
-      /* Empty filter */
+
       return false;
     }
   }
 
-  return true; /* Errors are treated as "key may match" */
+  return true;
 }

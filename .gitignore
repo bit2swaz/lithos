@@ -5,6 +5,7 @@ build/
 *.a
 *.so
 *.dylib
+.venv
 
 # Editor/IDE files (Good)
 .vscode/

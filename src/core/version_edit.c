@@ -1,15 +1,3 @@
-/**
- * version_edit.c - Encode/Decode manifest edits.
- *
- * Encoding strategy:
- * - Each field is written as a (tag, value) pair where `tag` is a varint.
- * - Tags are stable numeric identifiers so newer manifests can add fields
- *   without breaking older parsers (unknown tags can be skipped).
- * - Small integers and lengths use varint encoding to stay compact.
- *
- * Decoding mirrors the same loop: read tag, dispatch, and populate the
- * VersionEdit. This keeps the MANIFEST append-only and future-proof.
- */
 
 #include "core/version_edit.h"
 #include "util/coding.h"
@@ -17,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Tag identifiers (compact, varint encoded). Adding new tags is
- * backward-compatible. */
 typedef enum {
   kTagLogNumber = 1,
   kTagPrevLogNumber = 2,
@@ -31,8 +17,7 @@ static char *CopySlice(const Lithos_Slice src) {
   if (src.size == 0) {
     return NULL;
   }
-  // FileMetaData needs stable key bounds even after the source Slice's
-  // backing Arena/file buffer disappears, so we deep-copy here.
+
   char *buf = malloc(src.size);
   if (buf == NULL) {
     return NULL;
@@ -110,7 +95,7 @@ void VersionEdit_Init(VersionEdit *edit) { memset(edit, 0, sizeof(*edit)); }
 
 void VersionEdit_Clear(VersionEdit *edit) {
   for (size_t i = 0; i < edit->new_files_count; i++) {
-    /* If the FileMetaData was never attached to a Version, refs stays 0. */
+
     if (edit->new_files[i].file && edit->new_files[i].file->refs == 0) {
       free(edit->new_files[i].file->smallest_buf);
       free(edit->new_files[i].file->largest_buf);
@@ -213,25 +198,23 @@ Status VersionEdit_EncodeTo(VersionEdit *edit, Lithos_Slice *dst) {
   size_t len = 0;
 
   if (edit->has_log_number) {
-    /* Tag 1: log_number keeps WAL sequencing durable across restarts. */
+
     AppendVarint32(&buf, &cap, &len, kTagLogNumber);
     AppendVarint64(&buf, &cap, &len, edit->log_number);
   }
   if (edit->has_prev_log_number) {
-    /* Tag 2: previous log number allows recovery to validate continuity. */
+
     AppendVarint32(&buf, &cap, &len, kTagPrevLogNumber);
     AppendVarint64(&buf, &cap, &len, edit->prev_log_number);
   }
   if (edit->has_next_file_number) {
-    /* Tag 3: next_file_number reserves an ID range so future files do not
-     * collide. */
+
     AppendVarint32(&buf, &cap, &len, kTagNextFileNumber);
     AppendVarint64(&buf, &cap, &len, edit->next_file_number);
   }
 
   for (size_t i = 0; i < edit->deleted_files_count; i++) {
-    /* Tag 5: (level, file_number) tombstones remove obsolete files from the
-     * version. */
+
     AppendVarint32(&buf, &cap, &len, kTagDeletedFile);
     AppendVarint32(&buf, &cap, &len, (uint32_t)edit->deleted_files[i].level);
     AppendVarint64(&buf, &cap, &len, edit->deleted_files[i].number);
@@ -239,7 +222,7 @@ Status VersionEdit_EncodeTo(VersionEdit *edit, Lithos_Slice *dst) {
 
   for (size_t i = 0; i < edit->new_files_count; i++) {
     NewFile *nf = &edit->new_files[i];
-    /* Tag 4: new file metadata (level, number, size, smallest, largest). */
+
     AppendVarint32(&buf, &cap, &len, kTagNewFile);
     AppendVarint32(&buf, &cap, &len, (uint32_t)nf->level);
     AppendVarint64(&buf, &cap, &len, nf->file->number);
@@ -286,9 +269,7 @@ Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src) {
 
   const char *p = src.data;
   const char *limit = src.data + src.size;
-  /* Streaming parser: read (tag, payload) pairs until the buffer ends. Unknown
-   * tags currently produce a corruption error; relaxing this would enable
-   * forward-compatible skipping. */
+
   while (p < limit) {
     uint32_t tag = 0;
     if (!GetVarint32(&p, limit, &tag)) {
