@@ -1,0 +1,49 @@
+name: publish-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+      PKG_DIR: lithos-${{ github.ref_name }}-linux-amd64
+      ARCHIVE: lithos-${{ github.ref_name }}-linux-amd64.tar.gz
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: build
+        run: |
+          make clean
+          CFLAGS="-O3 -DNDEBUG -pthread" make all
+          make test -j2
+
+      - name: assemble release payload
+        run: |
+          mkdir "$PKG_DIR"
+          cp build/bin/lithos_cli "$PKG_DIR"/
+          cp build/bin/lithos_stress "$PKG_DIR"/
+          cp build/bin/lithos_fuzz "$PKG_DIR"/
+          cp build/liblithos.a "$PKG_DIR"/
+          cp -r include "$PKG_DIR"/
+          cp README.md LICENSE "$PKG_DIR"/
+          tar -czvf "$ARCHIVE" "$PKG_DIR"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - name: upload release assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: false
