@@ -38,6 +38,12 @@ CFLAGS := -std=c11 \
 # Linker flags
 LDFLAGS := -pthread
 
+# Enable sanitizers when SANITIZE=1
+ifeq ($(SANITIZE),1)
+CFLAGS += -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
+LDFLAGS += -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
+endif
+
 # ============ Directories ============
 
 SRC_DIR := src
@@ -96,24 +102,29 @@ CLI_SOURCES := tools/lithos_cli.c
 # Stress tool sources
 STRESS_SOURCES := tools/lithos_stress.c
 
+# Fuzz tool sources
+FUZZ_SOURCES := tools/lithos_fuzz.c
+
 # All object files
 LIB_OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(LIB_SOURCES))
 TEST_OBJECTS := $(patsubst tests/%.c,$(OBJ_DIR)/tests/%.o,$(TEST_SOURCES))
 CLI_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(CLI_SOURCES))
 STRESS_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(STRESS_SOURCES))
+FUZZ_OBJECTS := $(patsubst tools/%.c,$(OBJ_DIR)/tools/%.o,$(FUZZ_SOURCES))
 
 # Output files
 LIB_ARCHIVE := $(BUILD_DIR)/liblithos.a
 TEST_BINARY := $(BIN_DIR)/lithos_test
 CLI_BINARY := $(BIN_DIR)/lithos_cli
 STRESS_BINARY := $(BIN_DIR)/lithos_stress
+FUZZ_BINARY := $(BIN_DIR)/lithos_fuzz
 
 # ============ Targets ============
 
-.PHONY: all clean test help stress
+.PHONY: all clean test help stress fuzz sanitize
 
 # Default target: build everything
-all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY) $(STRESS_BINARY)
+all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY) $(STRESS_BINARY) $(FUZZ_BINARY)
 
 # Build the static library
 $(LIB_ARCHIVE): $(LIB_OBJECTS) | $(BUILD_DIR)
@@ -140,6 +151,13 @@ $(STRESS_BINARY): $(STRESS_OBJECTS) $(LIB_ARCHIVE)
 	@mkdir -p $(BIN_DIR)
 	@echo "[LINK] $@"
 	@$(CC) $(LDFLAGS) -o $@ $(STRESS_OBJECTS) -L$(BUILD_DIR) -llithos
+	@echo "Build successful: $@"
+
+# Build the fuzz executable
+$(FUZZ_BINARY): $(FUZZ_OBJECTS) $(LIB_ARCHIVE)
+	@mkdir -p $(BIN_DIR)
+	@echo "[LINK] $@"
+	@$(CC) $(LDFLAGS) -o $@ $(FUZZ_OBJECTS) -L$(BUILD_DIR) -llithos
 	@echo "Build successful: $@"
 
 # Compile library sources
@@ -180,6 +198,14 @@ test: $(TEST_BINARY)
 
 # Build the stress gauntlet tool
 stress: $(STRESS_BINARY)
+
+# Build the fuzz corruption tester
+fuzz: $(FUZZ_BINARY)
+
+# Build with sanitizers enabled
+sanitize:
+	@$(MAKE) clean
+	@$(MAKE) SANITIZE=1 all
 
 # Clean all build artifacts
 clean:

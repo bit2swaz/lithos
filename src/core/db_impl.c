@@ -1017,6 +1017,11 @@ Status Lithos_DB_Get(Lithos_DB* db, Lithos_Slice key, const Lithos_Snapshot* sna
 
         if (ikey_heap != NULL) free(ikey_heap);
 
+        /* Propagate real errors (e.g., corruption) instead of dropping them as not-found. */
+        if (!Status_IsOK(s) && !Status_IsNotFound(s)) {
+            return s;
+        }
+
         if (disk_found && value_out != NULL && disk_value.size > 0) {
             char* copy = malloc(disk_value.size + 1);
             if (copy != NULL) {

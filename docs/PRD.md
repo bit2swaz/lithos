@@ -26,6 +26,7 @@
 * **Crash Consistency:** Automatic WAL replay on startup recovers un-flushed MemTable data.
 * **Storage Efficiency:** Native Run-Length Encoding (RLE) and Prefix Compression minimize disk footprint.
 * **Maintenance:** Background compaction automatically merges and cleans up SSTables (Leveled Strategy).
+* **Corruption Detection:** SST block CRC32C is verified on read; checksum mismatches surface as `LITHOS_CORRUPTION`.
 
 ---
 
@@ -327,22 +328,33 @@ Standalone C binary that performs a "Gauntlet" test suite:
 3. **Persistence:** Reopen and sample keys to confirm durability.
 4. **Tombstones:** Bulk delete a range, reopen, and confirm absence via gets and scan.
 
+### 7.3 `lithos_fuzz`
+
+Corruption-injection harness that flips a random bit inside a freshly written SST:
+
+1. Write key `integrity_test`, close DB to flush to SST.
+2. Open the newest `.sst`, flip a random bit in the file.
+3. Reopen DB and issue `Get("integrity_test")`.
+4. Expect `LITHOS_CORRUPTION`/`LITHOS_IO_ERROR` (no crashes).
+
 ---
 
 ## 8. Build System
 
 * **Build Tool:** GNU Make
 * **Targets:**
-* `make all`: Builds library, tests, CLI, and stress.
+* `make all`: Builds library, tests, CLI, stress, fuzz.
 * `make test`: Runs unit tests (`lithos_test_main`).
 * `make stress`: Builds the stress tool.
+* `make fuzz`: Builds the corruption harness.
+* `make sanitize`: Rebuilds with `-fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer`.
 * `make help`: Prints target help.
 * `make clean`: Removes artifacts.
 
 
 * **Output:**
 * Library: `build/liblithos.a`
-* Binaries: `build/bin/lithos_cli`, `build/bin/lithos_stress`
+* Binaries: `build/bin/lithos_cli`, `build/bin/lithos_stress`, `build/bin/lithos_fuzz`
 
 
 
