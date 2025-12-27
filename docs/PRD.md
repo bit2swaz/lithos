@@ -27,6 +27,7 @@
 * **Storage Efficiency:** Native Run-Length Encoding (RLE) and Prefix Compression minimize disk footprint.
 * **Maintenance:** Background compaction automatically merges and cleans up SSTables (Leveled Strategy).
 * **Corruption Detection:** SST block CRC32C is verified on read; checksum mismatches surface as `LITHOS_CORRUPTION`.
+* **Sanitizer Cleanliness:** ASan/UBSan builds run `lithos_stress` and `lithos_fuzz` leak-free while still detecting injected SST corruption.
 
 ---
 
@@ -104,7 +105,7 @@ To prevent memory fragmentation and syscall overhead, Lithos avoids `malloc` for
 
 * **Mechanism:** Allocates memory in 4KB "Blocks".
 * **Allocation:** Bump-pointer allocation within the current block.
-* **Lifecycle:** The entire Arena is freed only when its owner (MemTable) is flushed and destroyed.
+* **Lifecycle:** The entire Arena is freed only when its owner (MemTable) is flushed and destroyed; background flushes drop both worker and DB refs to release arenas promptly.
 * **Alignment:** Enforces 8-byte alignment for all pointers.
 
 ### 3.2 The MemTable (SkipList)
@@ -368,3 +369,19 @@ The following tests must pass before any release:
 2. **Leak Check:** `valgrind --leak-check=full` must report **0 bytes lost**.
 3. **Gauntlet:** `lithos_stress` must pass all 4 stages (Saturation, Isolation, Persistence, Tombstones).
 4. **Benchmark:** `lithos_cli bench` must demonstrate >30k ops/sec.
+
+### 9.1 Sanitizer QA (ASan/UBSan)
+
+Run on fresh builds to guarantee leak/UB freedom while still surfacing corruption:
+
+```
+make sanitize -j$(nproc)
+
+rm -rf /tmp/lithos-sanitize-stress && ./build/bin/lithos_stress /tmp/lithos-sanitize-stress
+# Expect: Gauntlet passes, no sanitizer output.
+
+rm -rf /tmp/lithos-fuzz-db && ./build/bin/lithos_fuzz /tmp/lithos-fuzz-db
+# Expect: corruption message (flipped SST) and clean ASan/UBSan exit with zero leaks.
+```
+
+Notes: Imm memtable flush now drops both worker and DB refs; FileMetaData created during flush is released on both success and failure, keeping leak detectors clean.

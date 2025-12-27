@@ -69,7 +69,8 @@
 #include <assert.h>
 
 /* Constants */
-static const size_t kBlockSize = 4096;  // Allocate blocks in 4KB chunks
+static const size_t kBlockSize = 4096;             // Allocate blocks in 4KB chunks
+static const size_t kAlignment = 8;                // 8-byte alignment for slices/nodes
 
 /* Forward declarations */
 static char* Arena_AllocateFallbackSlow(Lithos_Arena* arena, size_t bytes);
@@ -202,16 +203,25 @@ void Arena_Destroy(Lithos_Arena* arena) {
     free(arena);
 }
 
+static inline char* AlignPtr(char* p) {
+    uintptr_t addr = (uintptr_t)p;
+    uintptr_t aligned = (addr + (kAlignment - 1)) & ~(uintptr_t)(kAlignment - 1);
+    return (char*)aligned;
+}
+
 char* Arena_Allocate(Lithos_Arena* arena, size_t bytes) {
     // Validate input
     assert(arena != NULL);
     assert(bytes > 0);
     
-    if (bytes <= arena->alloc_bytes_remaining) {
-        // Fast path: allocation fits in current block
-        char* result = arena->alloc_ptr;      // Hand out current pointer
-        arena->alloc_ptr += bytes;            // Bump pointer forward by requested bytes
-        arena->alloc_bytes_remaining -= bytes; // Decrease remaining space
+    char* aligned = AlignPtr(arena->alloc_ptr);
+    size_t padding = (size_t)(aligned - arena->alloc_ptr);
+    
+    if (bytes + padding <= arena->alloc_bytes_remaining) {
+        // Fast path: allocation fits in current block with alignment padding
+        char* result = aligned;
+        arena->alloc_ptr = result + bytes;
+        arena->alloc_bytes_remaining -= (bytes + padding);
         return result;
     }
     
@@ -239,24 +249,29 @@ char* Arena_Allocate(Lithos_Arena* arena, size_t bytes) {
  * Returns: Pointer to allocated memory, or NULL on failure.
  */
 char* Arena_AllocateFallbackSlow(Lithos_Arena* arena, size_t bytes) {
+    size_t block_bytes;
     if (bytes > kBlockSize / 4) {
-        // Large allocation: allocate a dedicated block
-        // Don't make it the current block to avoid wasting space
-        char* result = AllocateFallback(arena, bytes);
+        /* Large allocation: dedicated block with alignment headroom. */
+        block_bytes = bytes + kAlignment;
+        char* block = AllocateFallback(arena, block_bytes);
+        if (block == NULL) return NULL;
+        char* result = AlignPtr(block);
         return result;
     }
     
-    // Normal case: allocate a new standard block
-    char* new_block = AllocateFallback(arena, kBlockSize);
+    /* Normal case: allocate a new standard block with alignment headroom. */
+    block_bytes = kBlockSize + kAlignment;
+    char* new_block = AllocateFallback(arena, block_bytes);
     if (new_block == NULL) {
         return NULL;
     }
     
-    // Make this the current block
-    arena->alloc_ptr = new_block + bytes;          // Next free byte after the chunk we return
-    arena->alloc_bytes_remaining = kBlockSize - bytes; // Remaining capacity in this block
+    char* aligned = AlignPtr(new_block);
+    arena->alloc_ptr = aligned + bytes;  // Next free byte after the chunk we return
+    size_t used = (size_t)(arena->alloc_ptr - new_block);
+    arena->alloc_bytes_remaining = block_bytes - used;
     
-    return new_block;
+    return aligned;
 }
 
 char* Arena_AllocateAligned(Lithos_Arena* arena, size_t bytes) {

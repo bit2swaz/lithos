@@ -45,6 +45,8 @@ struct Lithos_DB {
     pthread_mutex_t mu;
     pthread_cond_t bg_cv;
     bool bg_running;
+    bool bg_thread_valid;
+    pthread_t bg_thread;
     bool shutting_down;
     Lithos_VersionSet* versions;
 };
@@ -309,6 +311,11 @@ static Status CompactMemTable(Lithos_DB* db) {
     char* fname = NULL;
     Status s = WriteLevel0Table(db, imm, &meta, &fname);
 
+    if (meta != NULL) {
+        /* Hold a worker ref so we can cleanly drop ownership regardless of apply outcome. */
+        FileMetaData_Ref(meta);
+    }
+
     pthread_mutex_lock(&db->mu);
 
     if (!Status_IsOK(s)) {
@@ -335,12 +342,23 @@ static Status CompactMemTable(Lithos_DB* db) {
         if (imm_log != NULL && db->imm_log_filename == NULL) {
             db->imm_log_filename = imm_log;
         }
+        /* meta is not owned by VersionSet on failure, free it here. */
+        if (meta != NULL) {
+            FileMetaData_Unref(meta);
+        }
+        /* Drop the worker's ref; ownership stays with db->imm for retry. */
         MemTable_Unref(imm);
         return apply_status;
     }
 
+    /* Success: drop worker ref and then the DB's ownership ref. */
     MemTable_Unref(imm);
     db->imm = NULL;
+    MemTable_Unref(imm);
+
+    if (meta != NULL) {
+        FileMetaData_Unref(meta);
+    }
 
     if (imm_log != NULL) {
         DeleteFileQuietly(imm_log);
@@ -613,6 +631,12 @@ static void MaybeScheduleCompaction(Lithos_DB* db) {
     if (db->shutting_down || db->bg_running) {
         return;
     }
+
+    /* Join any finished background thread before starting another to keep LSAN happy. */
+    if (db->bg_thread_valid && !db->bg_running) {
+        pthread_join(db->bg_thread, NULL);
+        db->bg_thread_valid = false;
+    }
     if (db->imm == NULL && !VersionSet_NeedsCompaction(db->versions)) {
         return;
     }
@@ -621,7 +645,8 @@ static void MaybeScheduleCompaction(Lithos_DB* db) {
     pthread_t t;
     int rc = pthread_create(&t, NULL, BackgroundCall, db);
     if (rc == 0) {
-        pthread_detach(t);
+        db->bg_thread = t;
+        db->bg_thread_valid = true;
     } else {
         db->bg_running = false;
         (void)BackgroundCall(db);
@@ -814,6 +839,7 @@ Status Lithos_DB_Open(const char* name, const Lithos_Options* options, Lithos_DB
     pthread_mutex_init(&db->mu, NULL);
     pthread_cond_init(&db->bg_cv, NULL);
     db->bg_running = false;
+    db->bg_thread_valid = false;
     db->shutting_down = false;
 
     db->versions = VersionSet_Create(name);
@@ -871,6 +897,11 @@ void Lithos_DB_Close(Lithos_DB* db) {
         pthread_cond_wait(&db->bg_cv, &db->mu);
     }
     pthread_mutex_unlock(&db->mu);
+
+    if (db->bg_thread_valid) {
+        pthread_join(db->bg_thread, NULL);
+        db->bg_thread_valid = false;
+    }
 
     if (db->versions) {
         VersionSet_Destroy(db->versions);

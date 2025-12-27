@@ -192,6 +192,7 @@ static bool detect_corruption_via_table(const char* sst_path, const Lithos_Optio
     if (Status_IsCorruption(ts) || Status_IsIOError(ts)) {
         printf("Detected corruption via direct Table_Open: %s\n", Status_ToString(ts));
         Status_Free(ts);
+        RandomAccessFile_Close(file);
         return true;
     }
 
@@ -199,6 +200,7 @@ static bool detect_corruption_via_table(const char* sst_path, const Lithos_Optio
         Table_Destroy(table);
     } else {
         Status_Free(ts);
+        RandomAccessFile_Close(file);
     }
 
     return false;
