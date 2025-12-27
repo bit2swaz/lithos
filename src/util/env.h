@@ -17,6 +17,7 @@ typedef struct Lithos_SequentialFile Lithos_SequentialFile;
 typedef struct Lithos_RandomAccessFile Lithos_RandomAccessFile;
 
 Status Env_NewWritableFile(const char *fname, Lithos_WritableFile **result);
+Status Env_NewAppendableFile(const char *fname, Lithos_WritableFile **result);
 
 Status WritableFile_Append(Lithos_WritableFile *f, Lithos_Slice data);
 

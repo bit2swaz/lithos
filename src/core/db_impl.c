@@ -898,7 +898,7 @@ Status Lithos_DB_Open(const char *name, const Lithos_Options *options,
     return s;
   }
 
-  s = Env_NewWritableFile(walname, &db->logfile);
+  s = Env_NewAppendableFile(walname, &db->logfile);
   if (!Status_IsOK(s)) {
     free(walname);
     Lithos_DB_Close(db);

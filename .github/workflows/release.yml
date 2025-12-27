@@ -22,7 +22,7 @@ jobs:
       - name: build
         run: |
           make clean
-          CFLAGS="-O3 -DNDEBUG -pthread" make all
+          CFLAGS="-O2 -DNDEBUG -pthread" make all
           make test -j2
 
       - name: assemble release payload

@@ -41,6 +41,30 @@ Status Env_NewWritableFile(const char *fname, Lithos_WritableFile **result) {
   return Status_OK();
 }
 
+Status Env_NewAppendableFile(const char *fname,
+                             Lithos_WritableFile **result) {
+
+  FILE *fp = fopen(fname, "ab");
+  if (fp == NULL) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Failed to open file: %s", fname);
+    return Status_IOError(msg, strerror(errno));
+  }
+
+  Lithos_WritableFile *f =
+      (Lithos_WritableFile *)malloc(sizeof(Lithos_WritableFile));
+  if (f == NULL) {
+    fclose(fp);
+    return Status_IOError("Out of memory", "");
+  }
+
+  f->fp = fp;
+  f->filename = strdup(fname);
+  *result = f;
+
+  return Status_OK();
+}
+
 Status WritableFile_Append(Lithos_WritableFile *f, Lithos_Slice data) {
   if (f == NULL || f->fp == NULL) {
     return Status_InvalidArgument("Invalid file handle");
