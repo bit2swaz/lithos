@@ -8,13 +8,13 @@ extern "C" {
 #endif
 
 typedef struct Lithos_ReadOptions {
-    const void* snapshot; /* reserved for future snapshot support */
+  const void *snapshot; /* reserved for future snapshot support */
 } Lithos_ReadOptions;
 
 static inline Lithos_ReadOptions Lithos_ReadOptions_Default(void) {
-    Lithos_ReadOptions opt;
-    opt.snapshot = NULL;
-    return opt;
+  Lithos_ReadOptions opt;
+  opt.snapshot = NULL;
+  return opt;
 }
 
 #ifdef __cplusplus

@@ -1,0 +1,50 @@
+name: Lithos CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Valgrind
+      run: sudo apt-get update && sudo apt-get install -y valgrind
+
+    - name: Build (Standard)
+      run: make clean all
+
+    - name: Run Unit Tests
+      run: ./build/bin/lithos_test
+
+    - name: Run Demo Script
+      run: ./demo_lithos.sh
+
+    - name: Run Stress Test
+      run: ./build/bin/lithos_stress /tmp/ci_stress_db
+
+    - name: Leak Check (Valgrind)
+      # We use a smaller fill count to keep CI fast
+      run: |
+        valgrind --error-exitcode=1 --leak-check=full \
+        ./build/bin/lithos_cli /tmp/leak_db fill 1000 128
+
+  sanitizer-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build with Sanitizers
+      # Assumes you added the 'sanitize' target to Makefile as discussed
+      run: make clean sanitize
+
+    - name: Run Stress Test (Sanitized)
+      run: ./build/bin/lithos_stress /tmp/san_stress_db
+
+    - name: Run Fuzz Test
+      run: ./build/bin/lithos_fuzz /tmp/san_fuzz_db

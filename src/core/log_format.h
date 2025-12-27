@@ -37,7 +37,7 @@ extern "C" {
 
 /**
  * Header size: 7 bytes
- * 
+ *
  * Layout:
  *   uint32_t checksum  (4 bytes, Little-Endian)
  *   uint16_t length    (2 bytes, Little-Endian)
@@ -47,17 +47,18 @@ extern "C" {
 
 /**
  * Maximum payload per record: 65535 bytes (uint16_t max).
- * In practice, limited by (kBlockSize - kHeaderSize) = 32761 bytes per fragment.
+ * In practice, limited by (kBlockSize - kHeaderSize) = 32761 bytes per
+ * fragment.
  */
 #define kMaxRecordSize 65535
 
 /**
  * RecordType - Indicates how the record fits in the block.
- * 
+ *
  * State Machine for Writer:
  * 1. If entire record fits: FULL.
  * 2. If record spans blocks: FIRST -> MIDDLE* -> LAST.
- * 
+ *
  * State Machine for Reader:
  * - FULL: Return immediately.
  * - FIRST: Start accumulating.
@@ -66,50 +67,48 @@ extern "C" {
  * - ZERO: Preallocated space (filler), skip.
  */
 typedef enum {
-    /**
-     * kZeroType: Reserved for preallocated space.
-     * 
-     * Use Case: If a record doesn't fit in the remaining block space
-     * (e.g., only 6 bytes left, but header needs 7), we fill the rest
-     * with zeros and start fresh in the next block.
-     */
-    kZeroType = 0,
-    
-    /**
-     * kFullType: The entire record fits in one block.
-     * 
-     * Most common case for small records (< 32KB).
-     */
-    kFullType = 1,
-    
-    /**
-     * kFirstType: Start of a fragmented record.
-     * 
-     * Indicates that more fragments follow in subsequent blocks.
-     */
-    kFirstType = 2,
-    
-    /**
-     * kMiddleType: Middle fragment of a large record.
-     * 
-     * There may be multiple MIDDLE fragments between FIRST and LAST.
-     */
-    kMiddleType = 3,
-    
-    /**
-     * kLastType: Final fragment of a large record.
-     * 
-     * After reading this, the reader has the complete record.
-     */
-    kLastType = 4
+  /**
+   * kZeroType: Reserved for preallocated space.
+   *
+   * Use Case: If a record doesn't fit in the remaining block space
+   * (e.g., only 6 bytes left, but header needs 7), we fill the rest
+   * with zeros and start fresh in the next block.
+   */
+  kZeroType = 0,
+
+  /**
+   * kFullType: The entire record fits in one block.
+   *
+   * Most common case for small records (< 32KB).
+   */
+  kFullType = 1,
+
+  /**
+   * kFirstType: Start of a fragmented record.
+   *
+   * Indicates that more fragments follow in subsequent blocks.
+   */
+  kFirstType = 2,
+
+  /**
+   * kMiddleType: Middle fragment of a large record.
+   *
+   * There may be multiple MIDDLE fragments between FIRST and LAST.
+   */
+  kMiddleType = 3,
+
+  /**
+   * kLastType: Final fragment of a large record.
+   *
+   * After reading this, the reader has the complete record.
+   */
+  kLastType = 4
 } RecordType;
 
 /**
  * Helper: Check if a RecordType is valid.
  */
-static inline int RecordType_IsValid(uint8_t type) {
-    return type <= kLastType;
-}
+static inline int RecordType_IsValid(uint8_t type) { return type <= kLastType; }
 
 #ifdef __cplusplus
 }

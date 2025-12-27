@@ -39,17 +39,18 @@
  * Key Concepts:
  * - Prefix compression: saves space by reusing common key prefixes.
  * - Restart points: uncompressed keys for binary search entry points.
- * - Two-level iteration: index block chooses data block, data block scans entries.
+ * - Two-level iteration: index block chooses data block, data block scans
+ * entries.
  */
 
 #ifndef LITHOS_CORE_TABLE_BLOCK_H_
 #define LITHOS_CORE_TABLE_BLOCK_H_
 
+#include "core/dbformat.h"
+#include "core/skiplist.h" /* For Lithos_Comparator */
 #include "lithos/iterator.h"
 #include "util/slice.h"
 #include "util/status.h"
-#include "core/dbformat.h"
-#include "core/skiplist.h"  /* For Lithos_Comparator */
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -62,9 +63,9 @@ extern "C" {
  * This is typically loaded into memory from disk and passed to Block_Create.
  */
 typedef struct {
-    const char* data;      // Block data (owned or borrowed)
-    size_t size;           // Size of the block
-    bool heap_allocated;   // If true, data is malloc'd and must be freed
+  const char *data;    // Block data (owned or borrowed)
+  size_t size;         // Size of the block
+  bool heap_allocated; // If true, data is malloc'd and must be freed
 } Lithos_BlockContents;
 
 /*
@@ -83,10 +84,11 @@ typedef struct Lithos_Block Lithos_Block;
  * Input: BlockContents (raw data buffer + size + ownership flag)
  * Output: Lithos_Block* (parsed block) or NULL on corruption/error
  * Intent: Validate the block footer (restart array + count) and create the
- *         in-memory representation. Takes ownership of the buffer if heap_allocated.
- *         This is the entry point for turning file bytes into a queryable block.
+ *         in-memory representation. Takes ownership of the buffer if
+ * heap_allocated. This is the entry point for turning file bytes into a
+ * queryable block.
  */
-Lithos_Block* Block_Create(Lithos_BlockContents contents);
+Lithos_Block *Block_Create(Lithos_BlockContents contents);
 
 /*
  * Block_Destroy: Clean up a Block object and its owned resources.
@@ -96,27 +98,27 @@ Lithos_Block* Block_Create(Lithos_BlockContents contents);
  * Intent: Free the block struct and, if owned=true, the underlying data buffer.
  *         Safe to call with NULL (no-op).
  */
-void Block_Destroy(Lithos_Block* block);
+void Block_Destroy(Lithos_Block *block);
 
 /*
  * Block_NewIterator: Create a forward iterator over a block's entries.
  * ============================================================
  * Input: Lithos_Block* (the block to iterate), Lithos_Comparator (for seeks)
- * Output: Lithos_Iterator* (generic iterator interface) or NULL on alloc failure
- * Intent: Allocate and initialize a BlockIterator that can scan entries sequentially
- *         or seek to specific keys using binary search on restart points.
+ * Output: Lithos_Iterator* (generic iterator interface) or NULL on alloc
+ * failure Intent: Allocate and initialize a BlockIterator that can scan entries
+ * sequentially or seek to specific keys using binary search on restart points.
  */
-Lithos_Iterator* Block_NewIterator(Lithos_Block* block, Lithos_Comparator cmp);
+Lithos_Iterator *Block_NewIterator(Lithos_Block *block, Lithos_Comparator cmp);
 
 /*
  * Block_GetRestartCount - Get the number of restart points in the block.
  *
  * Useful for debugging and validation.
  */
-uint32_t Block_GetRestartCount(const Lithos_Block* block);
+uint32_t Block_GetRestartCount(const Lithos_Block *block);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // LITHOS_CORE_TABLE_BLOCK_H_
+#endif // LITHOS_CORE_TABLE_BLOCK_H_

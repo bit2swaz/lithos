@@ -19,8 +19,8 @@
 
 #include "lithos/filter_policy.h"
 #include "util/slice.h"
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,12 +42,13 @@ typedef struct FilterBlockReader FilterBlockReader;
  *
  * Returns: New builder instance, or NULL on allocation failure.
  */
-FilterBlockBuilder* FilterBlockBuilder_Create(const Lithos_FilterPolicy* policy);
+FilterBlockBuilder *
+FilterBlockBuilder_Create(const Lithos_FilterPolicy *policy);
 
 /*
  * FilterBlockBuilder_Destroy - Free a filter block builder.
  */
-void FilterBlockBuilder_Destroy(FilterBlockBuilder* builder);
+void FilterBlockBuilder_Destroy(FilterBlockBuilder *builder);
 
 /*
  * FilterBlockBuilder_StartBlock - Signal start of a new data block.
@@ -58,7 +59,8 @@ void FilterBlockBuilder_Destroy(FilterBlockBuilder* builder);
  *
  * If we've crossed a 2KB boundary, generates a filter for accumulated keys.
  */
-void FilterBlockBuilder_StartBlock(FilterBlockBuilder* builder, uint64_t block_offset);
+void FilterBlockBuilder_StartBlock(FilterBlockBuilder *builder,
+                                   uint64_t block_offset);
 
 /*
  * FilterBlockBuilder_AddKey - Add a key to the current filter.
@@ -67,7 +69,7 @@ void FilterBlockBuilder_StartBlock(FilterBlockBuilder* builder, uint64_t block_o
  *   builder - The builder instance
  *   key     - The key to add
  */
-void FilterBlockBuilder_AddKey(FilterBlockBuilder* builder, Lithos_Slice key);
+void FilterBlockBuilder_AddKey(FilterBlockBuilder *builder, Lithos_Slice key);
 
 /*
  * FilterBlockBuilder_Finish - Finalize the filter block.
@@ -80,7 +82,7 @@ void FilterBlockBuilder_AddKey(FilterBlockBuilder* builder, Lithos_Slice key);
  * Returns: Slice containing the complete filter block.
  *          The data remains valid until the builder is destroyed.
  */
-Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder* builder);
+Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder *builder);
 
 /*
  * FilterBlockReader - Reads filter blocks for querying
@@ -97,13 +99,13 @@ Lithos_Slice FilterBlockBuilder_Finish(FilterBlockBuilder* builder);
  *
  * Note: The reader does NOT take ownership of contents.data.
  */
-FilterBlockReader* FilterBlockReader_Create(const Lithos_FilterPolicy* policy,
-                                              Lithos_Slice contents);
+FilterBlockReader *FilterBlockReader_Create(const Lithos_FilterPolicy *policy,
+                                            Lithos_Slice contents);
 
 /*
  * FilterBlockReader_Destroy - Free a filter block reader.
  */
-void FilterBlockReader_Destroy(FilterBlockReader* reader);
+void FilterBlockReader_Destroy(FilterBlockReader *reader);
 
 /*
  * FilterBlockReader_KeyMayMatch - Check if a key might exist in a block.
@@ -117,12 +119,11 @@ void FilterBlockReader_Destroy(FilterBlockReader* reader);
  *   true  - Key MIGHT be in the block (read the block to confirm)
  *   false - Key is DEFINITELY NOT in the block (skip the block)
  */
-bool FilterBlockReader_KeyMayMatch(FilterBlockReader* reader,
-                                    uint64_t block_offset,
-                                    Lithos_Slice key);
+bool FilterBlockReader_KeyMayMatch(FilterBlockReader *reader,
+                                   uint64_t block_offset, Lithos_Slice key);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  /* LITHOS_CORE_TABLE_FILTER_BLOCK_H_ */
+#endif /* LITHOS_CORE_TABLE_FILTER_BLOCK_H_ */

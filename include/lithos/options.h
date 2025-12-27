@@ -24,8 +24,8 @@
 #ifndef LITHOS_OPTIONS_H
 #define LITHOS_OPTIONS_H
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,41 +43,41 @@ typedef struct Lithos_Cache Lithos_Cache;
 /**
  * Database Options
  * ================
- * 
+ *
  * Configuration struct passed to various subsystems.
- * 
+ *
  * Fields:
  * -------
  * - block_restart_interval: Number of keys between restart points.
  *   Lower = faster binary search, higher = better compression.
  *   Default: 16 keys.
- * 
+ *
  * - block_size: Target size (bytes) for each data block before flushing.
  *   Larger = better compression, smaller = less memory overhead.
  *   Default: 4096 bytes (4KB).
- * 
+ *
  * - comparator: Key comparison function. If NULL, uses default bytewise.
- * 
- * - filter_policy: Probabilistic filter for read optimization. If NULL, no filters.
- *   Typical: NewBloomFilterPolicy(10) for ~1% false positive rate.
- * 
- * - block_cache: Shared block cache for uncompressed data blocks. If NULL, no caching.
- *   Typical: NewLRUCache(8 * 1024 * 1024) for 8MB cache.
+ *
+ * - filter_policy: Probabilistic filter for read optimization. If NULL, no
+ * filters. Typical: NewBloomFilterPolicy(10) for ~1% false positive rate.
+ *
+ * - block_cache: Shared block cache for uncompressed data blocks. If NULL, no
+ * caching. Typical: NewLRUCache(8 * 1024 * 1024) for 8MB cache.
  */
 typedef struct Lithos_Options {
-    size_t block_restart_interval;
-    size_t block_size;
-    const Comparator* comparator;
-    const Lithos_FilterPolicy* filter_policy;
-    Lithos_Cache* block_cache;
-    bool compression_enabled;
+  size_t block_restart_interval;
+  size_t block_size;
+  const Comparator *comparator;
+  const Lithos_FilterPolicy *filter_policy;
+  Lithos_Cache *block_cache;
+  bool compression_enabled;
 } Lithos_Options;
 
 /**
  * Initialize options with sensible defaults.
- * 
+ *
  * @param opt Output: Options struct to initialize.
- * 
+ *
  * Defaults:
  * ---------
  * - block_cache = NULL (No caching)
@@ -86,7 +86,7 @@ typedef struct Lithos_Options {
  * - comparator = NULL (Will use bytewise default)
  * - filter_policy = NULL (No filtering)
  */
-void Lithos_Options_InitDefault(Lithos_Options* opt);
+void Lithos_Options_InitDefault(Lithos_Options *opt);
 
 #ifdef __cplusplus
 }

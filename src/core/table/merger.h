@@ -17,9 +17,9 @@ extern "C" {
  * Ownership: the merging iterator takes ownership of child iterators and will
  * destroy them during Cleanup.
  */
-Lithos_Iterator* NewMergingIterator(Lithos_Iterator** children,
-                                    int num,
-                                    int (*comparator)(const void*, const void*));
+Lithos_Iterator *NewMergingIterator(Lithos_Iterator **children, int num,
+                                    int (*comparator)(const void *,
+                                                      const void *));
 
 #ifdef __cplusplus
 }

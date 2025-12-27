@@ -23,11 +23,11 @@
 #include "lithos/options.h"
 #include <stddef.h>
 
-void Lithos_Options_InitDefault(Lithos_Options* opt) {
-    opt->block_restart_interval = 16;   // Reset prefix compression every 16 keys
-    opt->block_size = 4096;              // 4KB blocks (standard page size)
-    opt->comparator = NULL;              // Will use default bytewise comparator
-    opt->filter_policy = NULL;           // No filtering by default
-    opt->block_cache = NULL;             // No caching by default
-    opt->compression_enabled = false;    // Compression off by default
+void Lithos_Options_InitDefault(Lithos_Options *opt) {
+  opt->block_restart_interval = 16; // Reset prefix compression every 16 keys
+  opt->block_size = 4096;           // 4KB blocks (standard page size)
+  opt->comparator = NULL;           // Will use default bytewise comparator
+  opt->filter_policy = NULL;        // No filtering by default
+  opt->block_cache = NULL;          // No caching by default
+  opt->compression_enabled = false; // Compression off by default
 }

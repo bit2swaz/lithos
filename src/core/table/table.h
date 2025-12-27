@@ -20,8 +20,8 @@
 
 #include "lithos/iterator.h"
 #include "lithos/options.h"
-#include "util/status.h"
 #include "util/env.h"
+#include "util/status.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -54,17 +54,15 @@ typedef struct Lithos_Table Lithos_Table;
  *
  * Ownership: Table takes ownership of 'file' and will close it on destroy.
  */
-Status Table_Open(const Lithos_Options* options,
-                  Lithos_RandomAccessFile* file,
-                  uint64_t file_size,
-                  Lithos_Table** table);
+Status Table_Open(const Lithos_Options *options, Lithos_RandomAccessFile *file,
+                  uint64_t file_size, Lithos_Table **table);
 
 /*
  * Table_Destroy - Close the table and free all resources.
  *
  * Closes the file handle, frees the index block, and releases memory.
  */
-void Table_Destroy(Lithos_Table* table);
+void Table_Destroy(Lithos_Table *table);
 
 /*
  * Table_NewIterator - Create an iterator over the table.
@@ -84,7 +82,8 @@ void Table_Destroy(Lithos_Table* table);
  *
  * Returns: Newly allocated iterator (caller must destroy)
  */
-Lithos_Iterator* Table_NewIterator(Lithos_Table* table, const Lithos_Options* options);
+Lithos_Iterator *Table_NewIterator(Lithos_Table *table,
+                                   const Lithos_Options *options);
 
 /*
  * Table_InternalGet - Internal method for point lookups.
@@ -103,13 +102,12 @@ Lithos_Iterator* Table_NewIterator(Lithos_Table* table, const Lithos_Options* op
  *
  * Returns: Status indicating success or error
  */
-Status Table_InternalGet(Lithos_Table* table,
-                         Lithos_Slice key,
-                         void* arg,
-                         void (*saver)(void* arg, Lithos_Slice key, Lithos_Slice value));
+Status Table_InternalGet(Lithos_Table *table, Lithos_Slice key, void *arg,
+                         void (*saver)(void *arg, Lithos_Slice key,
+                                       Lithos_Slice value));
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // LITHOS_CORE_TABLE_TABLE_H_
+#endif // LITHOS_CORE_TABLE_TABLE_H_

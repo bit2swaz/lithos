@@ -121,7 +121,7 @@ FUZZ_BINARY := $(BIN_DIR)/lithos_fuzz
 
 # ============ Targets ============
 
-.PHONY: all clean test help stress fuzz sanitize
+.PHONY: all clean test help stress fuzz sanitize install format
 
 # Default target: build everything
 all: $(LIB_ARCHIVE) $(TEST_BINARY) $(CLI_BINARY) $(STRESS_BINARY) $(FUZZ_BINARY)
@@ -206,6 +206,17 @@ fuzz: $(FUZZ_BINARY)
 sanitize:
 	@$(MAKE) clean
 	@$(MAKE) SANITIZE=1 all
+
+# Install static library and public headers
+install: $(LIB_ARCHIVE)
+	@echo "[INSTALL] liblithos.a -> /usr/local/lib"
+	@install -d /usr/local/lib /usr/local/include/lithos
+	@install -m644 $(LIB_ARCHIVE) /usr/local/lib/
+	@install -m644 include/lithos/*.h /usr/local/include/lithos/
+
+# Format all source and header files
+format:
+	@find src include tests tools -type f \( -name '*.c' -o -name '*.h' \) -print0 | xargs -0 clang-format -i
 
 # Clean all build artifacts
 clean:

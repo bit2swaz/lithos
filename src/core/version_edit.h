@@ -17,11 +17,11 @@
 #ifndef LITHOS_CORE_VERSION_EDIT_H
 #define LITHOS_CORE_VERSION_EDIT_H
 
-#include "util/status.h"
-#include "util/slice.h"
 #include "core/dbformat.h"
-#include <stdint.h>
+#include "util/slice.h"
+#include "util/status.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,66 +31,62 @@ extern "C" {
 
 /* File metadata tracked by the VersionSet */
 typedef struct FileMetaData {
-    uint64_t number;
-    uint64_t file_size;
-    Lithos_Slice smallest;   /* Smallest internal key contained in the file */
-    Lithos_Slice largest;    /* Largest internal key contained in the file */
-    int refs;                /* Reference count; freed when it reaches zero */
-    char* smallest_buf;      /* Owning buffers for the key bounds; copied so they outlive Arena sources */
-    char* largest_buf;
+  uint64_t number;
+  uint64_t file_size;
+  Lithos_Slice smallest; /* Smallest internal key contained in the file */
+  Lithos_Slice largest;  /* Largest internal key contained in the file */
+  int refs;              /* Reference count; freed when it reaches zero */
+  char *smallest_buf;    /* Owning buffers for the key bounds; copied so they
+                            outlive Arena sources */
+  char *largest_buf;
 } FileMetaData;
 
-void FileMetaData_Ref(FileMetaData* f);
-void FileMetaData_Unref(FileMetaData* f);
-FileMetaData* FileMetaData_Create(uint64_t number,
-                                  uint64_t file_size,
-                                  Lithos_Slice smallest,
-                                  Lithos_Slice largest);
+void FileMetaData_Ref(FileMetaData *f);
+void FileMetaData_Unref(FileMetaData *f);
+FileMetaData *FileMetaData_Create(uint64_t number, uint64_t file_size,
+                                  Lithos_Slice smallest, Lithos_Slice largest);
 
 /* Deleted file entry */
 typedef struct DeletedFile {
-    int level;
-    uint64_t number;
+  int level;
+  uint64_t number;
 } DeletedFile;
 
 /* Added file entry */
 typedef struct NewFile {
-    int level;
-    FileMetaData* file;
+  int level;
+  FileMetaData *file;
 } NewFile;
 
 /* VersionEdit - delta applied to the manifest */
 typedef struct VersionEdit {
-    bool has_log_number;
-    bool has_prev_log_number;
-    bool has_next_file_number;
-    uint64_t log_number;
-    uint64_t prev_log_number;
-    uint64_t next_file_number;
+  bool has_log_number;
+  bool has_prev_log_number;
+  bool has_next_file_number;
+  uint64_t log_number;
+  uint64_t prev_log_number;
+  uint64_t next_file_number;
 
-    NewFile* new_files;
-    size_t new_files_count;
-    size_t new_files_cap;
+  NewFile *new_files;
+  size_t new_files_count;
+  size_t new_files_cap;
 
-    DeletedFile* deleted_files;
-    size_t deleted_files_count;
-    size_t deleted_files_cap;
+  DeletedFile *deleted_files;
+  size_t deleted_files_count;
+  size_t deleted_files_cap;
 } VersionEdit;
 
-void VersionEdit_Init(VersionEdit* edit);
-void VersionEdit_Clear(VersionEdit* edit);
-void VersionEdit_SetLogNumber(VersionEdit* edit, uint64_t num);
-void VersionEdit_SetPrevLogNumber(VersionEdit* edit, uint64_t num);
-void VersionEdit_SetNextFileNumber(VersionEdit* edit, uint64_t num);
-void VersionEdit_AddFile(VersionEdit* edit,
-                         int level,
-                         uint64_t number,
-                         uint64_t file_size,
-                         Lithos_Slice smallest,
+void VersionEdit_Init(VersionEdit *edit);
+void VersionEdit_Clear(VersionEdit *edit);
+void VersionEdit_SetLogNumber(VersionEdit *edit, uint64_t num);
+void VersionEdit_SetPrevLogNumber(VersionEdit *edit, uint64_t num);
+void VersionEdit_SetNextFileNumber(VersionEdit *edit, uint64_t num);
+void VersionEdit_AddFile(VersionEdit *edit, int level, uint64_t number,
+                         uint64_t file_size, Lithos_Slice smallest,
                          Lithos_Slice largest);
-void VersionEdit_DeleteFile(VersionEdit* edit, int level, uint64_t number);
-Status VersionEdit_EncodeTo(VersionEdit* edit, Lithos_Slice* dst);
-Status VersionEdit_DecodeFrom(VersionEdit* edit, Lithos_Slice src);
+void VersionEdit_DeleteFile(VersionEdit *edit, int level, uint64_t number);
+Status VersionEdit_EncodeTo(VersionEdit *edit, Lithos_Slice *dst);
+Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src);
 
 #ifdef __cplusplus
 }
