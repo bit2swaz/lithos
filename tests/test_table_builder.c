@@ -1,5 +1,6 @@
 
 #include "all_tests.h"
+#include "core/dbformat.h"
 #include "core/table/format.h"
 #include "core/table/table.h"
 #include "core/table/table_builder.h"
@@ -10,6 +11,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+static Lithos_Slice MakeInternalKey(char *buf, size_t buf_size,
+                                    const char *user_key, SequenceNumber seq) {
+  size_t ukey_len = strlen(user_key);
+  if (ukey_len + 8 > buf_size) {
+    return (Lithos_Slice){NULL, 0};
+  }
+  memcpy(buf, user_key, ukey_len);
+  uint64_t packed = PackSequenceAndType(seq, kTypeValue);
+  EncodeFixed64(buf + ukey_len, packed);
+  return (Lithos_Slice){buf, ukey_len + 8};
+}
 
 static void Test_TableBuilder_Empty(void) {
   printf("[TEST] TableBuilder Empty                      ");
@@ -73,7 +86,8 @@ static void Test_TableBuilder_SingleEntry(void) {
   Lithos_TableBuilder *tb = TableBuilder_Create(&options, file);
   ASSERT_TRUE(tb != NULL);
 
-  Lithos_Slice key = Slice_FromCString("testkey");
+  char keybuf[64];
+  Lithos_Slice key = MakeInternalKey(keybuf, sizeof(keybuf), "testkey", 1);
   Lithos_Slice value = Slice_FromCString("testvalue");
   lithos_status_code status = TableBuilder_Add(tb, key, value);
   ASSERT_TRUE(status == LITHOS_OK);
@@ -111,11 +125,11 @@ static void Test_TableBuilder_MultipleEntries(void) {
   ASSERT_TRUE(tb != NULL);
 
   for (int i = 0; i < 100; i++) {
-    char key[64], value[64];
-    snprintf(key, sizeof(key), "key%05d", i);
+    char userkey[64], value[64], keybuf[80];
+    snprintf(userkey, sizeof(userkey), "key%05d", i);
     snprintf(value, sizeof(value), "value%05d", i);
 
-    Lithos_Slice k = Slice_FromCString(key);
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 100 - i);
     Lithos_Slice v = Slice_FromCString(value);
     lithos_status_code status = TableBuilder_Add(tb, k, v);
     ASSERT_TRUE(status == LITHOS_OK);
@@ -160,10 +174,10 @@ static void Test_TableBuilder_MultipleBlocks(void) {
 
   int num_keys = 50;
   for (int i = 0; i < num_keys; i++) {
-    char key[64];
-    snprintf(key, sizeof(key), "bigkey%05d", i);
+    char userkey[64], keybuf[80];
+    snprintf(userkey, sizeof(userkey), "bigkey%05d", i);
 
-    Lithos_Slice k = Slice_FromCString(key);
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 100 - i);
     Lithos_Slice v = {large_value, 512};
     lithos_status_code status = TableBuilder_Add(tb, k, v);
     ASSERT_TRUE(status == LITHOS_OK);
@@ -206,12 +220,12 @@ static void Test_TableBuilder_LargeTable(void) {
 
   int num_entries = 10000;
   for (int i = 0; i < num_entries; i++) {
-    char key[64], value[128];
-    snprintf(key, sizeof(key), "largekey%08d", i);
+    char userkey[64], value[128], keybuf[80];
+    snprintf(userkey, sizeof(userkey), "largekey%08d", i);
     snprintf(value, sizeof(value),
              "This is test value number %d with some extra padding", i);
 
-    Lithos_Slice k = Slice_FromCString(key);
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 20000 - i);
     Lithos_Slice v = Slice_FromCString(value);
     lithos_status_code status = TableBuilder_Add(tb, k, v);
     ASSERT_TRUE(status == LITHOS_OK);
@@ -280,9 +294,9 @@ static void Test_TableBuilder_Compression(void) {
   value[sizeof(value) - 1] = '\0';
 
   for (int i = 0; i < num_entries; i++) {
-    char key[64];
-    snprintf(key, sizeof(key), "ckey%05d", i);
-    Lithos_Slice k = Slice_FromCString(key);
+    char userkey[64], keybuf[80];
+    snprintf(userkey, sizeof(userkey), "ckey%05d", i);
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 1000 - i);
     Lithos_Slice v = {value, strlen(value)};
     lithos_status_code status = TableBuilder_Add(tb, k, v);
     ASSERT_TRUE(status == LITHOS_OK);
@@ -319,8 +333,9 @@ static void Test_TableBuilder_Compression(void) {
     Lithos_Slice val = Lithos_Iter_Value(iter);
     char expected_key[64];
     snprintf(expected_key, sizeof(expected_key), "ckey%05d", i);
-    ASSERT_TRUE(key.size == strlen(expected_key));
-    ASSERT_TRUE(memcmp(key.data, expected_key, key.size) == 0);
+    size_t ukey_len = strlen(expected_key);
+    ASSERT_TRUE(key.size == ukey_len + 8);
+    ASSERT_TRUE(memcmp(key.data, expected_key, ukey_len) == 0);
     ASSERT_TRUE(val.size == strlen(value));
     ASSERT_TRUE(memcmp(val.data, value, val.size) == 0);
     Lithos_Iter_Next(iter);

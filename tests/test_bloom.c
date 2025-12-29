@@ -1,14 +1,28 @@
 
 #include "all_tests.h"
+#include "core/dbformat.h"
 #include "core/table/filter_block.h"
 #include "core/table/table.h"
 #include "core/table/table_builder.h"
 #include "lithos/filter_policy.h"
 #include "testharness.h"
+#include "util/coding.h"
 #include "util/env.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+static Lithos_Slice MakeInternalKey(char *buf, size_t buf_size,
+                                    const char *user_key, SequenceNumber seq) {
+  size_t ukey_len = strlen(user_key);
+  if (ukey_len + 8 > buf_size) {
+    return (Lithos_Slice){NULL, 0};
+  }
+  memcpy(buf, user_key, ukey_len);
+  uint64_t packed = PackSequenceAndType(seq, kTypeValue);
+  EncodeFixed64(buf + ukey_len, packed);
+  return (Lithos_Slice){buf, ukey_len + 8};
+}
 
 static void Test_Bloom_Basic(void) {
   printf("[TEST] Bloom Filter Basic                      ");
@@ -196,12 +210,13 @@ static void Test_Bloom_TableIntegration(void) {
   ASSERT_TRUE(builder != NULL);
 
   for (int i = 0; i < 100; i++) {
-    char key[32], value[64];
-    snprintf(key, sizeof(key), "key%05d", i);
+    char userkey[32], value[64], keybuf[48];
+    snprintf(userkey, sizeof(userkey), "key%05d", i);
     snprintf(value, sizeof(value), "value%05d", i);
 
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 1000 - i);
     lithos_status_code status = TableBuilder_Add(
-        builder, Slice_FromCString(key), Slice_FromCString(value));
+        builder, k, Slice_FromCString(value));
     ASSERT_TRUE(status == LITHOS_OK);
   }
 
@@ -229,9 +244,10 @@ static void Test_Bloom_TableIntegration(void) {
   ASSERT_TRUE(iter != NULL);
 
   for (int i = 0; i < 100; i++) {
-    char key[32];
-    snprintf(key, sizeof(key), "key%05d", i);
-    Lithos_Iter_Seek(iter, Slice_FromCString(key));
+    char userkey[32], keybuf[48];
+    snprintf(userkey, sizeof(userkey), "key%05d", i);
+    Lithos_Slice k = MakeInternalKey(keybuf, sizeof(keybuf), userkey, 1000 - i);
+    Lithos_Iter_Seek(iter, k);
     ASSERT_TRUE(Lithos_Iter_Valid(iter));
   }
 
