@@ -290,6 +290,7 @@ static Status WriteLevel0Table(Lithos_DB *db, Lithos_MemTable *mem,
   }
 
   if (key_count == 0) {
+    Iter_Destroy(iter);
     TableBuilder_Destroy(builder);
     WritableFile_Close(file);
     DeleteFileQuietly(fname);
@@ -366,6 +367,7 @@ static Status CompactMemTable(Lithos_DB *db) {
 
   if (meta == NULL) {
     MemTable_Unref(imm);
+    MemTable_Unref(imm);
     db->imm = NULL;
     if (imm_log) {
       free(imm_log);
@@ -400,8 +402,8 @@ static Status CompactMemTable(Lithos_DB *db) {
   }
 
   MemTable_Unref(imm);
-  db->imm = NULL;
   MemTable_Unref(imm);
+  db->imm = NULL;
 
   if (meta != NULL) {
     FileMetaData_Unref(meta);
