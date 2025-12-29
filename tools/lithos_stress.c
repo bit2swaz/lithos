@@ -181,6 +181,9 @@ static void persistence_test(const char *dbpath, Lithos_Options *opt,
       make_value(idx, expected, sizeof(expected));
       s = Lithos_Get(db, key, NULL, &out);
       assert(Status_IsOK(s));
+      if (strcmp(out, expected) != 0) {
+        fprintf(stderr, "Mismatch for key=%s: got '%s', expected '%s'\n", key, out, expected);
+      }
       assert(strcmp(out, expected) == 0);
       Lithos_Free(out);
     }
@@ -201,6 +204,7 @@ static void tombstone_scan_cb(const char *key, const char *value, void *arg) {
   int idx;
   if (sscanf(key, "key_%06d", &idx) == 1) {
     if (idx >= BULK_DELETE_START && idx < BULK_DELETE_END) {
+      fprintf(stderr, "[VIOLATION] Scan emitted tombstoned key: %s (val=%s)\n", key, value);
       ctx->violations++;
     }
   }

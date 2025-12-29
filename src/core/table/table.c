@@ -3,11 +3,13 @@
 #include "core/table/block.h"
 #include "core/table/filter_block.h"
 #include "core/table/format.h"
+#include "core/dbformat.h"
 #include "lithos/cache.h"
 #include "util/coding.h"
 #include "util/compression.h"
 #include "util/crc32c.h"
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -557,8 +559,10 @@ Status Table_InternalGet(Lithos_Table *table, Lithos_Slice key, void *arg,
 
   if (Lithos_Iter_Valid(iter)) {
     Lithos_Slice found_key = Lithos_Iter_Key(iter);
+    Lithos_Slice found_user = ExtractUserKey(found_key);
+    Lithos_Slice target_user = ExtractUserKey(key);
 
-    if (Slice_Compare(found_key, key) == 0) {
+    if (Slice_Compare(found_user, target_user) == 0) {
       Lithos_Slice value = Lithos_Iter_Value(iter);
       saver(arg, found_key, value);
     }

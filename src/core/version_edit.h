@@ -19,6 +19,7 @@ typedef struct FileMetaData {
   uint64_t file_size;
   Lithos_Slice smallest;
   Lithos_Slice largest;
+  SequenceNumber max_sequence;  // Maximum sequence number in the file
   int refs;
   char *smallest_buf;
 
@@ -28,7 +29,8 @@ typedef struct FileMetaData {
 void FileMetaData_Ref(FileMetaData *f);
 void FileMetaData_Unref(FileMetaData *f);
 FileMetaData *FileMetaData_Create(uint64_t number, uint64_t file_size,
-                                  Lithos_Slice smallest, Lithos_Slice largest);
+                                  Lithos_Slice smallest, Lithos_Slice largest,
+                                  SequenceNumber max_sequence);
 
 typedef struct DeletedFile {
   int level;
@@ -64,7 +66,7 @@ void VersionEdit_SetPrevLogNumber(VersionEdit *edit, uint64_t num);
 void VersionEdit_SetNextFileNumber(VersionEdit *edit, uint64_t num);
 void VersionEdit_AddFile(VersionEdit *edit, int level, uint64_t number,
                          uint64_t file_size, Lithos_Slice smallest,
-                         Lithos_Slice largest);
+                         Lithos_Slice largest, SequenceNumber max_sequence);
 void VersionEdit_DeleteFile(VersionEdit *edit, int level, uint64_t number);
 Status VersionEdit_EncodeTo(VersionEdit *edit, Lithos_Slice *dst);
 Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src);

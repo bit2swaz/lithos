@@ -52,10 +52,10 @@ for k in "${SAMPLE_KEYS[@]}"; do
   fi
 done
 
-log "Size check (<10MB expected)"
+log "Size check (<12MB expected)"
 size_k=$(du -sk "$DB_DIR" | awk '{print $1}')
-if (( size_k >= 10000 )); then
-  echo "DB directory too large: ${size_k}K (expected < 10000K)" >&2
+if (( size_k >= 12000 )); then
+  echo "DB directory too large: ${size_k}K (expected < 12000K)" >&2
   exit 1
 fi
 

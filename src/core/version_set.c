@@ -1,6 +1,7 @@
 
 #include "core/version_set.h"
 #include "core/version_edit.h"
+#include "core/log_reader.h"
 #include "util/coding.h"
 #include <assert.h>
 #include <stdio.h>
@@ -159,11 +160,110 @@ Lithos_VersionSet *VersionSet_Create(const char *dbname) {
     snprintf(manifest_name, sizeof(manifest_name), "MANIFEST-%06llu",
              (unsigned long long)set->current_manifest_number);
   }
-  Status s = Env_NewWritableFile(manifest_name, &set->descriptor_file);
+  Status s = Env_NewAppendableFile(manifest_name, &set->descriptor_file);
   if (!Status_IsOK(s)) {
     VersionSet_Destroy(set);
     return NULL;
   }
+  set->descriptor_log = LogWriter_Create(set->descriptor_file);
+  return set;
+}
+
+Lithos_VersionSet *VersionSet_Recover(const char *dbname) {
+  char manifest_name[512];
+  snprintf(manifest_name, sizeof(manifest_name), "%s/MANIFEST-000001", dbname);
+  
+  Lithos_SequentialFile *file = NULL;
+  Status s = Env_NewSequentialFile(manifest_name, &file);
+  if (!Status_IsOK(s)) {
+    Status_Free(s);
+    return VersionSet_Create(dbname);
+  }
+  
+  Lithos_VersionSet *set = calloc(1, sizeof(Lithos_VersionSet));
+  if (set == NULL) {
+    SequentialFile_Close(file);
+    return NULL;
+  }
+  
+  set->dbname = DupString(dbname);
+  set->current_manifest_number = 1;
+  set->next_file_number = 2;
+  set->table_cache = TableCache_Create(dbname, 1024);
+  
+  set->dummy_versions = Version_New(set);
+  set->dummy_versions->next = set->dummy_versions->prev = set->dummy_versions;
+  
+  set->current = Version_New(set);
+  set->current->next = set->current->prev = NULL;
+  Version_Ref(set->current);
+  VersionLink(set, set->current);
+  
+  LogReader *reader = LogReader_Create(file, true);
+  if (reader == NULL) {
+    SequentialFile_Close(file);
+    VersionSet_Destroy(set);
+    return NULL;
+  }
+  
+  Lithos_Slice record;
+  char *scratch = NULL;
+  int edit_count = 0;
+  
+  while (LogReader_ReadRecord(reader, &record, &scratch)) {
+    VersionEdit edit;
+    VersionEdit_Init(&edit);
+    
+    Status decode_s = VersionEdit_DecodeFrom(&edit, record);
+    if (!Status_IsOK(decode_s)) {
+      Status_Free(decode_s);
+      VersionEdit_Clear(&edit);
+      break;
+    }
+    
+    if (edit.has_next_file_number && edit.next_file_number > set->next_file_number) {
+      set->next_file_number = edit.next_file_number;
+    }
+    
+    Lithos_Version *new_version = NULL;
+    Status build_s = Version_BuildFromEdit(set, set->current, &edit, &new_version);
+    if (!Status_IsOK(build_s)) {
+      Status_Free(build_s);
+      VersionEdit_Clear(&edit);
+      break;
+    }
+    
+    Version_Ref(new_version);
+    VersionLink(set, new_version);
+    
+    Lithos_Version *old = set->current;
+    set->current = new_version;
+    Version_Unref(old);
+    
+    edit_count++;
+    
+    for (size_t i = 0; i < edit.new_files_count; i++) {
+      edit.new_files[i].file = NULL;
+    }
+    edit.new_files_count = 0;
+    edit.deleted_files_count = 0;
+    
+    VersionEdit_Clear(&edit);
+  }
+  
+  if (scratch) {
+    free(scratch);
+  }
+  LogReader_Destroy(reader);
+  SequentialFile_Close(file);
+  
+  Status open_s = Env_NewAppendableFile(manifest_name, &set->descriptor_file);
+  if (!Status_IsOK(open_s)) {
+    Status_Free(open_s);
+    VersionSet_Destroy(set);
+    return NULL;
+  }
+  
   set->descriptor_log = LogWriter_Create(set->descriptor_file);
   return set;
 }
@@ -232,6 +332,7 @@ Status VersionSet_LogAndApply(Lithos_VersionSet *set, VersionEdit *edit) {
     Version_Destroy(new_version);
     return s;
   }
+  
   WritableFile_Flush(set->descriptor_file);
   WritableFile_Sync(set->descriptor_file);
 
@@ -403,10 +504,14 @@ Status Version_Get(Lithos_Version *v, const Lithos_ReadOptions *options,
         FileMetaData *f = v->files[level][i];
         Lithos_Slice smallest_user = ExtractUserKey(f->smallest);
         Lithos_Slice largest_user = ExtractUserKey(f->largest);
-        if (Slice_Compare(key.user_key, smallest_user) < 0)
+        
+        if (Slice_Compare(key.user_key, smallest_user) < 0) {
           continue;
-        if (Slice_Compare(key.user_key, largest_user) > 0)
+        }
+        if (Slice_Compare(key.user_key, largest_user) > 0) {
           continue;
+        }
+        
         bool file_found = false;
         bool file_deleted = false;
         Status s = TableCache_Get(cache, f, key.internal_key, value,

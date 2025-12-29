@@ -27,13 +27,15 @@ static char *CopySlice(const Lithos_Slice src) {
 }
 
 FileMetaData *FileMetaData_Create(uint64_t number, uint64_t file_size,
-                                  Lithos_Slice smallest, Lithos_Slice largest) {
+                                  Lithos_Slice smallest, Lithos_Slice largest,
+                                  SequenceNumber max_sequence) {
   FileMetaData *m = malloc(sizeof(FileMetaData));
   if (m == NULL) {
     return NULL;
   }
   m->number = number;
   m->file_size = file_size;
+  m->max_sequence = max_sequence;
   m->refs = 0;
   m->smallest_buf = CopySlice(smallest);
   m->largest_buf = CopySlice(largest);
@@ -124,13 +126,13 @@ void VersionEdit_SetNextFileNumber(VersionEdit *edit, uint64_t num) {
 
 void VersionEdit_AddFile(VersionEdit *edit, int level, uint64_t number,
                          uint64_t file_size, Lithos_Slice smallest,
-                         Lithos_Slice largest) {
+                         Lithos_Slice largest, SequenceNumber max_sequence) {
   if (!EnsureNewCapacity(&edit->new_files, &edit->new_files_cap,
                          edit->new_files_count + 1)) {
     return;
   }
   FileMetaData *meta =
-      FileMetaData_Create(number, file_size, smallest, largest);
+      FileMetaData_Create(number, file_size, smallest, largest, max_sequence);
   if (meta == NULL) {
     return;
   }
@@ -229,6 +231,7 @@ Status VersionEdit_EncodeTo(VersionEdit *edit, Lithos_Slice *dst) {
     AppendVarint64(&buf, &cap, &len, nf->file->file_size);
     AppendSlice(&buf, &cap, &len, nf->file->smallest);
     AppendSlice(&buf, &cap, &len, nf->file->largest);
+    AppendVarint64(&buf, &cap, &len, nf->file->max_sequence);
   }
 
   *dst = Slice_Create(buf, len);
@@ -313,6 +316,7 @@ Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src) {
       uint64_t fsize;
       Lithos_Slice small;
       Lithos_Slice large;
+      uint64_t max_seq = 0;
       if (!GetVarint32(&p, limit, &level))
         return Status_Corruption("bad new level", NULL);
       if (!GetVarint64(&p, limit, &num))
@@ -323,7 +327,9 @@ Status VersionEdit_DecodeFrom(VersionEdit *edit, Lithos_Slice src) {
         return Status_Corruption("bad smallest", NULL);
       if (!GetLengthPrefixedSlice(&p, limit, &large))
         return Status_Corruption("bad largest", NULL);
-      VersionEdit_AddFile(edit, (int)level, num, fsize, small, large);
+      if (!GetVarint64(&p, limit, &max_seq))
+        return Status_Corruption("bad max sequence", NULL);
+      VersionEdit_AddFile(edit, (int)level, num, fsize, small, large, max_seq);
       break;
     }
     default:

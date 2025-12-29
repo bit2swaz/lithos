@@ -3,6 +3,7 @@
 #include "core/table/block_builder.h"
 #include "core/table/filter_block.h"
 #include "core/table/format.h"
+#include "core/dbformat.h"
 #include "util/coding.h"
 #include "util/compression.h"
 #include "util/crc32c.h"
@@ -213,7 +214,7 @@ lithos_status_code TableBuilder_Add(Lithos_TableBuilder *tb, Lithos_Slice key,
   if (tb->num_entries > 0) {
 
     Lithos_Slice last = {tb->last_key, tb->last_key_size};
-    assert(Slice_Compare(last, key) < 0);
+    assert(InternalKeyComparator(&last, &key) < 0);
   }
 
   if (tb->pending_index_entry) {

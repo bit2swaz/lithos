@@ -110,8 +110,10 @@ static void TableCache_Saver(void *arg, Lithos_Slice ikey, Lithos_Slice val) {
   if (ctx == NULL)
     return;
   ParsedInternalKey pik;
-  if (!ParseInternalKey(ikey, &pik))
+  if (!ParseInternalKey(ikey, &pik)) {
+    fprintf(stderr, "[ERROR] Failed to parse internal key\n");
     return;
+  }
 
   if (pik.type == kTypeDeletion) {
     if (ctx->deleted)
@@ -123,8 +125,13 @@ static void TableCache_Saver(void *arg, Lithos_Slice ikey, Lithos_Slice val) {
       *ctx->found = true;
     if (ctx->deleted)
       *ctx->deleted = false;
-    if (ctx->value_out)
-      *ctx->value_out = val;
+    if (ctx->value_out && val.size > 0) {
+      char *copy = malloc(val.size);
+      if (copy) {
+        memcpy(copy, val.data, val.size);
+        *ctx->value_out = Slice_Create(copy, val.size);
+      }
+    }
   }
 }
 

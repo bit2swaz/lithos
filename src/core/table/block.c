@@ -165,7 +165,7 @@ static uint32_t BlockIter_SeekToRestartPoint(BlockIterator *iter,
     }
 
     Lithos_Slice mid_key = {iter->key_buf, iter->key_size};
-    int cmp = Slice_Compare(mid_key, target);
+    int cmp = iter->cmp(&mid_key, &target);
 
     if (cmp < 0) {
       left = mid;
@@ -239,7 +239,7 @@ static void BlockIter_Seek(void *state, Lithos_Slice target) {
 
   while (iter->valid) {
     Lithos_Slice current_key = {iter->key_buf, iter->key_size};
-    int cmp = Slice_Compare(current_key, target);
+    int cmp = iter->cmp(&current_key, &target);
 
     if (cmp >= 0) {
       return;

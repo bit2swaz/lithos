@@ -45,6 +45,7 @@ struct Lithos_VersionSet {
 };
 
 Lithos_VersionSet *VersionSet_Create(const char *dbname);
+Lithos_VersionSet *VersionSet_Recover(const char *dbname);
 void VersionSet_Destroy(Lithos_VersionSet *set);
 Status VersionSet_LogAndApply(Lithos_VersionSet *set, VersionEdit *edit);
 uint64_t VersionSet_NewFileNumber(Lithos_VersionSet *set);

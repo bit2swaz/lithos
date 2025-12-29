@@ -16,7 +16,7 @@ static void Test_EditSerialization(void) {
   VersionEdit_SetPrevLogNumber(&edit, 6);
   VersionEdit_SetNextFileNumber(&edit, 9);
   VersionEdit_AddFile(&edit, 0, 10, 123, Slice_FromCString("a"),
-                      Slice_FromCString("z"));
+                      Slice_FromCString("z"), 100);
   VersionEdit_DeleteFile(&edit, 1, 5);
 
   Lithos_Slice encoded;
@@ -53,7 +53,7 @@ static void Test_VersionSetApply(void) {
   VersionEdit edit1;
   VersionEdit_Init(&edit1);
   VersionEdit_AddFile(&edit1, 0, 10, 100, Slice_FromCString("a"),
-                      Slice_FromCString("b"));
+                      Slice_FromCString("b"), 100);
 
   Lithos_VersionSet *vs = VersionSet_Create("/tmp/lithos_vs");
   ASSERT_TRUE(vs != NULL);
@@ -67,7 +67,7 @@ static void Test_VersionSetApply(void) {
   VersionEdit_Init(&edit2);
   VersionEdit_DeleteFile(&edit2, 0, 10);
   VersionEdit_AddFile(&edit2, 0, 12, 120, Slice_FromCString("c"),
-                      Slice_FromCString("d"));
+                      Slice_FromCString("d"), 120);
   s = VersionSet_LogAndApply(vs, &edit2);
   ASSERT_OK(s);
   ASSERT_TRUE(vs->current->file_counts[0] == 1);
@@ -87,7 +87,7 @@ static void Test_VersionRefCounting(void) {
   VersionEdit e1;
   VersionEdit_Init(&e1);
   VersionEdit_AddFile(&e1, 0, 1, 10, Slice_FromCString("a"),
-                      Slice_FromCString("b"));
+                      Slice_FromCString("b"), 10);
   ASSERT_OK(VersionSet_LogAndApply(vs, &e1));
 
   Lithos_Version *v1 = vs->current;
@@ -96,7 +96,7 @@ static void Test_VersionRefCounting(void) {
   VersionEdit e2;
   VersionEdit_Init(&e2);
   VersionEdit_AddFile(&e2, 0, 2, 20, Slice_FromCString("c"),
-                      Slice_FromCString("d"));
+                      Slice_FromCString("d"), 20);
   ASSERT_OK(VersionSet_LogAndApply(vs, &e2));
 
   ASSERT_TRUE(v1->refs == 1);
