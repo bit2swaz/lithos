@@ -7,12 +7,15 @@ lithos relies on the following invariants to stay correct and diagnosable. chang
 - single active memtable: exactly one mutable memtable (`mem`) at a time; a flush swaps it into `imm` and creates a fresh `mem`.
 - manifest is source of truth: `manifest` (versionedits) is the only durable catalog for sst ownership; in-memory `version` mirrors it.
 - file numbers are monotonic: `versionset_newfilenumber` never reuses numbers; manifest replay must restore `next_file_number`.
+- sequence numbers persist: `filemetadata.max_sequence` stores the highest sequence in each sst; db open scans all files to restore `last_sequence` and prevent reuse.
 
 ## memory and ownership
 - arena ownership: each memtable owns its arena; refcounts guard shared views. flush completion drops both worker and db refs to release memory.
 - filemetadata refs: every `filemetadata` is refcounted by versions (and temp users) and is unrefed on both success and failure paths.
 - alignment: arena allocations are 8-byte aligned; skiplist nodes and encoded entries assume this.
 - cache handles: `tablecache` handles must be released via `cache_release`/iterator cleanup paths.
+- merge iterator ownership: `mergingiterator` owns its child iterators and destroys them on cleanup; callers must not destroy children separately.
+- memtable ref symmetry: every `memtable_ref` must have a corresponding `memtable_unref`; `compactmemtable` refs for local work and unrefs twice on completion (once for local, once for db->imm).
 
 ## concurrency
 - db mutex: all writes and version changes hold `db->mu`; readers take snapshots (`version_ref`) before releasing the mutex.
@@ -32,3 +35,4 @@ lithos relies on the following invariants to stay correct and diagnosable. chang
 ## testing and qa
 - sanitizers clean: asan/ubsan builds for stress and fuzz must run leak/ub free while still detecting injected sst corruption.
 - valgrind clean: `valgrind --leak-check=full` reports 0 bytes lost on `lithos_cli fill` smoke.
+- internal key format: tests using `tablebuilder_add` or iterator seeks must supply internal keys (user key + 8-byte packed sequence/type), not raw user keys.

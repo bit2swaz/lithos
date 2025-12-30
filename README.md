@@ -10,6 +10,7 @@ lithos is a high performance, persistent log-structured merge-tree (lsm) key-val
 - mvcc reads: snapshots give repeatable reads without blocking writers.
 - strict durability: wal-first writes and manifest-backed versioning.
 - corruption visibility: block checksums are verified on read; errors surface, not hidden.
+- sequence recovery: sequence numbers persist in sst metadata and are restored on db open.
 
 ## capabilities at a glance
 | area | what you get |
@@ -102,12 +103,16 @@ int main(void) {
 - valgrind smoke: `valgrind --leak-check=full ./build/bin/lithos_cli /tmp/leak_db fill 1000 128`.
 
 ## documentation
+- architecture deep-dive: [docs/architecture.md](docs/ARCHITECTURE.md)
 - design invariants: [docs/design_invariants.md](docs/DESIGN_INVARIANTS.md)
 - formatting guide: [docs/format.md](docs/FORMAT.md)
 - product requirements: [docs/prd.md](docs/PRD.md)
+- changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ## contribution guidelines
 - keep invariants intact: refcounts on `filemetadata` and memtables must balance on success and failure paths.
+- iterator ownership: merge iterators own their children; do not destroy children after passing to a merge iterator.
+- internal key format: tests must use internal keys (user key + 8-byte trailer) when calling low-level table apis.
 - prefer small, single-purpose changes; include tests for new behavior.
 - run `make format` and `make test` (or `make sanitize` for deeper checks) before sending a patch.
 

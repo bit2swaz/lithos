@@ -3,7 +3,7 @@
 | meta | value |
 | --- | --- |
 | project | lithos |
-| version | 1.0.0 (release) |
+| version | 1.0.0 |
 | author | aditya (`@bit2swaz`) |
 | status | production |
 | language | c11 (iso/iec 9899:2011) |
@@ -28,6 +28,7 @@
 - maintenance: background compaction automatically merges and cleans up sstables (leveled strategy).
 - corruption detection: sst block crc32c is verified on read; checksum mismatches surface as `lithos_corruption`.
 - sanitizer cleanliness: asan/ubsan builds run `lithos_stress` and `lithos_fuzz` leak-free while still detecting injected sst corruption.
+- sequence recovery: on db open, `max_sequence` is recovered from sst file metadata to prevent sequence number reuse after restart.
 
 ---
 
@@ -125,8 +126,7 @@ to prevent memory fragmentation and syscall overhead, lithos avoids `malloc` for
 ### 3.3 the versionset (mvcc and metadata)
 
 * manifest: a log file (`manifest-XXXXXX`) stores `versionedit` records.
-* versionedit: describes a delta transition (e.g., delete file 4 from l0, add file 5 to l1).
-* snapshot logic:
+* versionedit: describes a delta transition (e.g., delete file 4 from l0, add file 5 to l1).* `filemetadata`: stores file number, size, key range (smallest/largest), and `max_sequence` for recovery.* snapshot logic:
 * `lithos_getsnapshot` captures the current `lastsequence`.
 * `compaction` prevents deletion of overwritten keys if their sequence number is visible to an active snapshot.
 
@@ -221,6 +221,7 @@ the algorithm (`docompactionwork`):
 - open `mergingiterator` (k-way merge sort).
 - iterate through keys.
 - drop rule: discard key if (`type == ktypedeletion` and key not in higher levels) or (`sequence < smallestsnapshot` and overwritten).
+- ownership: the merging iterator owns its children; callers must not destroy children separately.
 
 
 4. output: write to new sstable(s).
@@ -384,3 +385,17 @@ rm -rf /tmp/lithos-fuzz-db && ./build/bin/lithos_fuzz /tmp/lithos-fuzz-db
 ```
 
 notes: imm memtable flush now drops both worker and db refs; filemetadata created during flush is released on both success and failure, keeping leak detectors clean.
+
+### 9.2 recent bug fixes
+
+the following issues were identified and resolved:
+
+1. **sequence number recovery**: `filemetadata` now stores `max_sequence` (highest sequence number in file). on db open, the engine scans all sst files and restores `last_sequence` to prevent reusing sequence numbers after restart.
+
+2. **double-free in compaction**: `docompactionwork` previously destroyed merge iterator children after the merge iterator itself had already freed them. fixed by removing redundant child destruction.
+
+3. **memory leaks in db close**:
+   - iterator leak: `writelevel0table` now destroys the memtable iterator on empty-table early return.
+   - memtable ref leak: `compactmemtable` now properly unrefs both the local reference and the db->imm reference before clearing the pointer.
+
+4. **test internal key format**: unit tests now use proper internal keys (user key + 8-byte sequence/type trailer) when calling `tablebuilder_add` and iterator seeks.
