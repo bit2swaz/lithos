@@ -4,6 +4,8 @@
 
 lithos is a high performance, persistent log-structured merge-tree (lsm) key-value engine written in c. it is a lightweight, zero dependency alternative to leveldb/rocksdb for embedded linux deployments that still provides acide-like durability, snapshot isolation (mvcc), and crash consistency without a c++ runtime. cli `bench` (50k ops, 512b values) on dev hardware sustains ~73k writes/sec and ~97k reads/sec.
 
+_For a deep dive into databases, head over to [this blog](https://bit2-blog.vercel.app/posts/lithos-deep-dive) of mine._
+
 ## why lithos
 - small, predictable footprint: only `libc` and `pthread` are required.
 - fast write path: memtable + wal with leveled compaction to ssts.
